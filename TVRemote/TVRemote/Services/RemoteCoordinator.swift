@@ -70,6 +70,8 @@ final class RemoteCoordinator: ObservableObject {
         async let appleResult = discover(using: appleTVAdapter)
         let found = await rokuResult + googleResult + appleResult
 
+        guard !Task.isCancelled else { return }
+
         var unique: [String: RemoteDevice] = [:]
         for device in RecentDeviceStore.load() + found {
             unique[device.id] = device
@@ -80,12 +82,17 @@ final class RemoteCoordinator: ObservableObject {
             }
             return $0.platform.displayName < $1.platform.displayName
         }
-        if !preserveConnection {
-            state = .disconnected
-        }
-        statusMessage = found.isEmpty
+
+        let discoveryMessage = found.isEmpty
             ? "No new TVs found. You can add a Roku or Google TV by IP address."
             : "Found \(found.count) TV\(found.count == 1 ? "" : "s")."
+
+        if !preserveConnection, state == .discovering {
+            state = .disconnected
+            statusMessage = discoveryMessage
+        } else if preserveConnection, state == .connected {
+            statusMessage = discoveryMessage
+        }
     }
 
     func connect(to device: RemoteDevice) async {

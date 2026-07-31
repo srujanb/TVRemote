@@ -4,8 +4,6 @@ struct RemoteView: View {
     @ObservedObject var coordinator: RemoteCoordinator
     let device: RemoteDevice
 
-    @State private var showsKeyboard = false
-
     private var capabilities: RemoteCapabilities {
         coordinator.capabilities ?? .roku
     }
@@ -38,11 +36,6 @@ struct RemoteView: View {
                 Button("Disconnect") {
                     Task { await coordinator.disconnect() }
                 }
-            }
-        }
-        .sheet(isPresented: $showsKeyboard) {
-            TVKeyboardView(deviceName: device.name) { text in
-                await coordinator.sendText(text)
             }
         }
     }
@@ -122,64 +115,13 @@ struct RemoteView: View {
                     .multilineTextAlignment(.center)
             }
 
-            if device.platform == .googleTV, !coordinator.availableColorRelayDevices.isEmpty {
-                colorRelayPicker
-            }
-        }
-    }
-
-    private var colorRelayPicker: some View {
-        VStack(spacing: 7) {
-            Divider()
-
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Color-button relay")
-                        .font(.subheadline.weight(.semibold))
-                    Text("All other commands stay connected to \(device.name).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-
-                if coordinator.colorRelayState == .connecting {
-                    ProgressView()
-                } else {
-                    Menu {
-                        Button("Send directly to \(device.name)") {
-                            Task { await coordinator.disableColorRelay() }
-                        }
-                        ForEach(coordinator.availableColorRelayDevices) { relayDevice in
-                            Button("Route through \(relayDevice.name)") {
-                                Task { await coordinator.connectColorRelay(to: relayDevice) }
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Text(coordinator.colorRelayDevice?.name ?? "Direct")
-                                .lineLimit(1)
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption2)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-
-            if let message = coordinator.colorRelayMessage {
-                Text(message)
+            if device.platform == .googleTV {
+                Text("Color buttons not working? Choose a color-button relay in Settings.")
                     .font(.caption)
-                    .foregroundStyle(colorRelayFailed ? Color.red : Color.secondary)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
         }
-        .padding(.top, 4)
-    }
-
-    private var colorRelayFailed: Bool {
-        if case .failed = coordinator.colorRelayState { return true }
-        return false
     }
 
     private var mediaControls: some View {
@@ -223,7 +165,7 @@ struct RemoteView: View {
 
     private var keyboardButton: some View {
         Button {
-            showsKeyboard = true
+            coordinator.presentTextInput()
         } label: {
             Label("Type on TV", systemImage: "keyboard")
                 .font(.headline)

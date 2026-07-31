@@ -69,6 +69,35 @@ enum PairingKeyboard: Equatable, Sendable {
     case hexadecimal
 }
 
+struct RemoteTextInputContext: Equatable, Sendable {
+    let text: String
+    let selectionStart: Int
+    let selectionEnd: Int
+    let label: String?
+    let fieldCounter: Int?
+
+    init(
+        text: String = "",
+        selectionStart: Int = 0,
+        selectionEnd: Int = 0,
+        label: String? = nil,
+        fieldCounter: Int? = nil
+    ) {
+        self.text = text
+        self.selectionStart = selectionStart
+        self.selectionEnd = selectionEnd
+        self.label = label
+        self.fieldCounter = fieldCounter
+    }
+}
+
+struct RemoteTextInputSession: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let initialText: String
+    let fieldLabel: String?
+    let wasAutomaticallyDetected: Bool
+}
+
 enum ConnectionOutcome: Equatable, Sendable {
     case connected
     case pairingRequired(PairingPrompt)
@@ -84,6 +113,17 @@ protocol TVRemoteAdapter: AnyObject {
     func disconnect() async
     func send(_ command: RemoteCommand) async throws
     func sendText(_ text: String) async throws
+    func beginTextInput() async throws
+    func updateText(from previousText: String, to newText: String) async throws
+}
+
+extension TVRemoteAdapter {
+    func beginTextInput() async throws {}
+
+    func updateText(from previousText: String, to newText: String) async throws {
+        guard newText != previousText else { return }
+        try await sendText(newText)
+    }
 }
 
 enum TVRemoteError: LocalizedError, Equatable {

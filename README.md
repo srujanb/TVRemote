@@ -83,9 +83,14 @@ red/green/yellow/blue commands, so those controls are shown disabled.
 
 ## Keyboard behavior
 
-Open a search, login, or other editable field on the TV first. Tap **Type on
-TV**, enter text, and tap **Send to TV**. Some streaming apps intentionally
-block remote text entry in password or protected fields.
+Google TV and Apple TV automatically open the iPhone keyboard when their remote
+protocol reports that an editable field gained focus. A compact one-line field
+appears above a blurred remote while the iPhone keyboard is active; tap outside
+the field to close it. On Google TV, close the TV's on-screen keyboard before
+typing from the iPhone. Roku ECP cannot report text-field focus, so tap **Type on
+TV** after opening its on-screen keyboard. Text and deletions are sent
+incrementally as you type; there is no separate send step. Some streaming apps
+intentionally block remote text entry in password or protected fields.
 
 ## Privacy
 

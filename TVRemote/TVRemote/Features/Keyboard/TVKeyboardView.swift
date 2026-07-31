@@ -1,81 +1,67 @@
 import SwiftUI
 
-struct TVKeyboardView: View {
-    @Environment(\.dismiss) private var dismiss
+struct TVKeyboardBar: View {
     @FocusState private var isFocused: Bool
-    @State private var text = ""
-    @State private var isSending = false
-    @State private var errorMessage: String?
+    @Binding private var text: String
 
     let deviceName: String
-    let onSend: (String) async -> Bool
+    let fieldLabel: String?
+    let showsTVKeyboardHint: Bool
+    let onClose: () -> Void
 
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Open a text field on \(deviceName), then type here.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                TextEditor(text: $text)
-                    .focused($isFocused)
-                    .font(.body)
-                    .padding(8)
-                    .frame(minHeight: 130)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.secondary.opacity(0.35))
-                    )
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-
-                Button {
-                    Task { await send() }
-                } label: {
-                    if isSending {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Label("Send to TV", systemImage: "paperplane.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(text.isEmpty || isSending)
-
-                Text("Text entry works only while the TV or its current app has an editable field active.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-            }
-            .padding()
-            .navigationTitle("TV Keyboard")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-        .task { isFocused = true }
+    init(
+        deviceName: String,
+        text: Binding<String>,
+        fieldLabel: String?,
+        showsTVKeyboardHint: Bool,
+        onClose: @escaping () -> Void
+    ) {
+        self.deviceName = deviceName
+        self.fieldLabel = fieldLabel
+        self.showsTVKeyboardHint = showsTVKeyboardHint
+        self.onClose = onClose
+        _text = text
     }
 
-    private func send() async {
-        isSending = true
-        errorMessage = nil
-        let succeeded = await onSend(text)
-        isSending = false
-        if succeeded {
-            dismiss()
-        } else {
-            errorMessage = "The TV did not accept the text. Make sure a text field is active."
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: "keyboard")
+                    .foregroundStyle(.secondary)
+
+                TextField(fieldLabel ?? "Type on \(deviceName)", text: $text)
+                    .focused($isFocused)
+                    .textFieldStyle(.plain)
+                    .submitLabel(.done)
+
+                Button(action: onClose) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Close TV keyboard")
+            }
+            .frame(height: 36)
+
+            if showsTVKeyboardHint {
+                Text("Close the keyboard on your TV for typed text to appear.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.secondary.opacity(0.2))
+        }
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .task {
+            await Task.yield()
+            isFocused = true
         }
     }
 }

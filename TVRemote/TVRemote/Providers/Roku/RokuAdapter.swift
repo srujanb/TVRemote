@@ -77,6 +77,23 @@ final class RokuAdapter: TVRemoteAdapter {
         }
     }
 
+    func updateText(from previousText: String, to newText: String) async throws {
+        guard previousText != newText else { return }
+
+        if newText.hasPrefix(previousText) {
+            try await sendText(String(newText.dropFirst(previousText.count)))
+        } else if previousText.hasPrefix(newText) {
+            for _ in 0..<previousText.dropFirst(newText.count).count {
+                try await post(pathComponent: "keypress/Backspace")
+            }
+        } else {
+            for _ in previousText {
+                try await post(pathComponent: "keypress/Backspace")
+            }
+            try await sendText(newText)
+        }
+    }
+
     private func post(pathComponent: String) async throws {
         guard let baseURL else { throw TVRemoteError.notConnected }
         guard let url = URL(string: pathComponent, relativeTo: baseURL)?.absoluteURL else {

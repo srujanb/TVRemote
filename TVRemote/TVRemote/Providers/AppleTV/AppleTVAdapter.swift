@@ -5,8 +5,11 @@ import ItsytvCore
 final class AppleTVAdapter: TVRemoteAdapter {
     let platform = TVPlatform.appleTV
     let capabilities = RemoteCapabilities.appleTV
+    var onTextInputRequested: ((RemoteTextInputContext) -> Void)?
+    var onTextInputEnded: (() -> Void)?
 
     private let manager = AppleTVManager()
+    private var keyboardMonitorTask: Task<Void, Never>?
 
     func discover(timeout: TimeInterval) async throws -> [RemoteDevice] {
         manager.startScanning()
@@ -34,7 +37,11 @@ final class AppleTVAdapter: TVRemoteAdapter {
             modelName: nil
         )
         manager.connect(to: appleDevice)
-        return try await waitForConnection(timeout: 10)
+        let outcome = try await waitForConnection(timeout: 10)
+        if outcome == .connected {
+            startKeyboardMonitoring()
+        }
+        return outcome
     }
 
     func submitPIN(_ pin: String) async throws {
@@ -47,9 +54,12 @@ final class AppleTVAdapter: TVRemoteAdapter {
         guard outcome == .connected else {
             throw TVRemoteError.protocolFailure("Apple TV requested another pairing code.")
         }
+        startKeyboardMonitoring()
     }
 
     func disconnect() async {
+        keyboardMonitorTask?.cancel()
+        keyboardMonitorTask = nil
         manager.disconnect()
     }
 
@@ -99,6 +109,36 @@ final class AppleTVAdapter: TVRemoteAdapter {
         guard manager.connectionStatus == .connected else { throw TVRemoteError.notConnected }
         manager.resetTextInputState()
         manager.updateRemoteText(text)
+    }
+
+    func beginTextInput() async throws {
+        guard manager.connectionStatus == .connected else { throw TVRemoteError.notConnected }
+        manager.resetTextInputState()
+    }
+
+    func updateText(from previousText: String, to newText: String) async throws {
+        guard manager.connectionStatus == .connected else { throw TVRemoteError.notConnected }
+        guard previousText != newText else { return }
+        manager.updateRemoteText(newText)
+    }
+
+    private func startKeyboardMonitoring() {
+        keyboardMonitorTask?.cancel()
+        keyboardMonitorTask = Task { @MainActor [weak self] in
+            var wasFocused = false
+            while let self,
+                  !Task.isCancelled,
+                  self.manager.connectionStatus == .connected {
+                let isFocused = self.manager.keyboardFocused
+                if isFocused && !wasFocused {
+                    self.onTextInputRequested?(RemoteTextInputContext())
+                } else if !isFocused && wasFocused {
+                    self.onTextInputEnded?()
+                }
+                wasFocused = isFocused
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+        }
     }
 
     private func waitForConnection(timeout: TimeInterval) async throws -> ConnectionOutcome {

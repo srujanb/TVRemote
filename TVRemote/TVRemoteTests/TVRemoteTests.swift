@@ -52,6 +52,68 @@ final class TVRemoteTests: XCTestCase {
         XCTAssertEqual(values, [true, true, false])
     }
 
+    func testGoogleTVTextInputRequestDecoding() async {
+        let status = GoogleTVProto.varintField(1, 7)
+            + GoogleTVProto.stringField(2, "query")
+            + GoogleTVProto.varintField(3, 5)
+            + GoogleTVProto.varintField(4, 5)
+            + GoogleTVProto.stringField(6, "Search")
+        let request = GoogleTVProto.message(field: 2, payload: status)
+        let context = await MainActor.run {
+            GoogleTVAdapter.textInputContext(fromContainer: request)
+        }
+
+        XCTAssertEqual(context?.text, "query")
+        XCTAssertEqual(context?.selectionStart, 5)
+        XCTAssertEqual(context?.selectionEnd, 5)
+        XCTAssertEqual(context?.label, "Search")
+        XCTAssertEqual(context?.fieldCounter, 7)
+    }
+
+    func testGoogleTVTextInputBatchEditDecoding() async {
+        let textObject = GoogleTVProto.varintField(1, 2)
+            + GoogleTVProto.varintField(2, 2)
+            + GoogleTVProto.stringField(3, "hey")
+        let editInfo = GoogleTVProto.varintField(1, 1)
+            + GoogleTVProto.message(field: 2, payload: textObject)
+        let batchEdit = GoogleTVProto.varintField(1, 3)
+            + GoogleTVProto.varintField(2, 9)
+            + GoogleTVProto.message(field: 3, payload: editInfo)
+        let context = await MainActor.run {
+            GoogleTVAdapter.textInputContext(fromBatchEdit: batchEdit)
+        }
+
+        XCTAssertEqual(context?.text, "hey")
+        XCTAssertEqual(context?.selectionStart, 2)
+        XCTAssertEqual(context?.selectionEnd, 2)
+        XCTAssertEqual(context?.fieldCounter, 9)
+    }
+
+    func testGoogleTVTextInputBatchEncoding() async {
+        let message = await MainActor.run {
+            GoogleTVAdapter.imeBatchEditMessage(
+                text: "query",
+                imeCounter: 3,
+                fieldCounter: 7,
+                insert: 1
+            )
+        }
+        let batch = GoogleTVProto.fields(message)[21]
+        let edit = batch.flatMap { GoogleTVProto.fields($0)[3] }
+        let status = edit.flatMap { GoogleTVProto.fields($0)[2] }
+
+        XCTAssertNotNil(batch)
+        XCTAssertEqual(GoogleTVProto.intField(batch!, number: 1), 3)
+        XCTAssertEqual(GoogleTVProto.intField(batch!, number: 2), 7)
+        XCTAssertEqual(GoogleTVProto.intField(edit!, number: 1), 1)
+        XCTAssertEqual(
+            String(data: GoogleTVProto.fields(status!)[3]!, encoding: .utf8),
+            "query"
+        )
+        XCTAssertEqual(GoogleTVProto.intField(status!, number: 1), 4)
+        XCTAssertEqual(GoogleTVProto.intField(status!, number: 2), 4)
+    }
+
     func testGoogleTVProtoRoundTrip() {
         let nested = GoogleTVProto.varintField(1, 623)
             + GoogleTVProto.stringField(2, "remote")

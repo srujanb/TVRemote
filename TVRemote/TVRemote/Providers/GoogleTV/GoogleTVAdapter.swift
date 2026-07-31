@@ -1,12 +1,16 @@
 import Foundation
 import Network
+import OSLog
 import Security
 import UIKit
+
+private let googleTVLog = Logger(subsystem: "com.sbarai.TVRemote", category: "GoogleTV")
 
 @MainActor
 final class GoogleTVAdapter: TVRemoteAdapter {
     let platform = TVPlatform.googleTV
     let capabilities = RemoteCapabilities.googleTV
+    var onTextInputRequested: ((RemoteTextInputContext) -> Void)?
 
     private enum Mode {
         case pairing
@@ -59,6 +63,8 @@ final class GoogleTVAdapter: TVRemoteAdapter {
         currentDevice = device
         shouldReconnect = true
         reconnectAttempts = 0
+        imeCounter = 0
+        imeFieldCounter = 0
         if KeychainStore.load(account: pairingAccount(for: device)) != nil {
             open(host: device.host, port: device.port ?? 6466, mode: .remote)
             do {
@@ -113,6 +119,8 @@ final class GoogleTVAdapter: TVRemoteAdapter {
         receiveBuffer.removeAll()
         currentDevice = nil
         sessionState = .idle
+        imeCounter = 0
+        imeFieldCounter = 0
     }
 
     func send(_ command: RemoteCommand) async throws {
@@ -124,16 +132,40 @@ final class GoogleTVAdapter: TVRemoteAdapter {
     func sendText(_ text: String) async throws {
         guard sessionState == .connected else { throw TVRemoteError.notConnected }
         guard !text.isEmpty else { return }
-        let finalPosition = max(text.utf16.count - 1, 0)
-        let textFieldStatus = GoogleTVProto.varintField(1, finalPosition)
-            + GoogleTVProto.varintField(2, finalPosition)
-            + GoogleTVProto.stringField(3, text)
-        let edit = GoogleTVProto.varintField(1, 1)
-            + GoogleTVProto.message(field: 2, payload: textFieldStatus)
-        let batch = GoogleTVProto.varintField(1, imeCounter)
-            + GoogleTVProto.varintField(2, imeFieldCounter)
-            + GoogleTVProto.message(field: 3, payload: edit)
-        sendPayload(GoogleTVProto.message(field: 21, payload: batch))
+        googleTVLog.debug(
+            "Sending IME insert with imeCounter=\(self.imeCounter), fieldCounter=\(self.imeFieldCounter), length=\(text.utf16.count)."
+        )
+        sendPayload(
+            Self.imeBatchEditMessage(
+                text: text,
+                imeCounter: imeCounter,
+                fieldCounter: imeFieldCounter,
+                insert: 1
+            )
+        )
+    }
+
+    func beginTextInput() async throws {
+        guard sessionState == .connected else { throw TVRemoteError.notConnected }
+    }
+
+    func updateText(from previousText: String, to newText: String) async throws {
+        guard sessionState == .connected else { throw TVRemoteError.notConnected }
+        guard previousText != newText else { return }
+
+        if previousText.hasPrefix(newText) {
+            for _ in 0..<previousText.dropFirst(newText.count).count {
+                sendKeyCode(67, direction: 3)
+            }
+        } else if newText.hasPrefix(previousText) {
+            let addedText = String(newText.dropFirst(previousText.count))
+            try await sendText(addedText)
+        } else {
+            for _ in previousText {
+                sendKeyCode(67, direction: 3)
+            }
+            try await sendText(newText)
+        }
     }
 
     private func open(host: String, port: UInt16, mode: Mode) {
@@ -239,22 +271,19 @@ final class GoogleTVAdapter: TVRemoteAdapter {
             return
         }
 
-        if let configure = fields[1] {
-            let supported = GoogleTVProto.intField(configure, number: 1) ?? 623
-            let active = supported & 623
+        if fields[1] != nil {
             let client = GoogleTVProto.varintField(3, 1)
                 + GoogleTVProto.stringField(4, "1")
                 + GoogleTVProto.stringField(5, "ios-tv-remote")
                 + GoogleTVProto.stringField(6, "1.0")
-            let response = GoogleTVProto.varintField(1, active)
+            let response = GoogleTVProto.varintField(1, 622)
                 + GoogleTVProto.message(field: 2, payload: client)
             sendPayload(GoogleTVProto.message(field: 1, payload: response))
-        } else if let setActive = fields[2] {
-            let active = GoogleTVProto.intField(setActive, number: 1) ?? 623
+        } else if fields[2] != nil {
             sendPayload(
                 GoogleTVProto.message(
                     field: 2,
-                    payload: GoogleTVProto.varintField(1, active & 623)
+                    payload: GoogleTVProto.varintField(1, 622)
                 )
             )
         } else if let ping = fields[8] {
@@ -265,9 +294,23 @@ final class GoogleTVAdapter: TVRemoteAdapter {
                     payload: GoogleTVProto.varintField(1, value)
                 )
             )
+        } else if let imeKeyInject = fields[20] {
+            if let context = Self.textInputContext(fromContainer: imeKeyInject) {
+                handleTextInputContext(context, source: "IME key-inject status")
+            }
         } else if let ime = fields[21] {
             imeCounter = GoogleTVProto.intField(ime, number: 1) ?? imeCounter
             imeFieldCounter = GoogleTVProto.intField(ime, number: 2) ?? imeFieldCounter
+            googleTVLog.debug(
+                "Received IME batch state with imeCounter=\(self.imeCounter), fieldCounter=\(self.imeFieldCounter)."
+            )
+            if let context = Self.textInputContext(fromBatchEdit: ime) {
+                handleTextInputContext(context, source: "IME batch-edit status")
+            }
+        } else if let showRequest = fields[22] {
+            if let context = Self.textInputContext(fromContainer: showRequest) {
+                handleTextInputContext(context, source: "IME show request")
+            }
         } else if fields[40] != nil {
             reconnectAttempts = 0
             sessionState = .connected
@@ -288,6 +331,13 @@ final class GoogleTVAdapter: TVRemoteAdapter {
         let keyEvent = GoogleTVProto.varintField(1, keyCode)
             + GoogleTVProto.varintField(2, direction)
         sendPayload(GoogleTVProto.message(field: 10, payload: keyEvent))
+    }
+
+    private func handleTextInputContext(_ context: RemoteTextInputContext, source: String) {
+        googleTVLog.debug(
+            "Detected focused text field from \(source, privacy: .public), statusCounter=\(context.fieldCounter ?? -1)."
+        )
+        onTextInputRequested?(context)
     }
 
     private func handleSessionFailure(_ message: String) {
@@ -365,5 +415,56 @@ final class GoogleTVAdapter: TVRemoteAdapter {
         default:
             false
         }
+    }
+
+    static func textInputContext(fromContainer container: Data) -> RemoteTextInputContext? {
+        guard let status = GoogleTVProto.fields(container)[2] else { return nil }
+        let fields = GoogleTVProto.fields(status)
+        let text = fields[2].flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let selectionStart = GoogleTVProto.intField(status, number: 3) ?? text.utf16.count
+        let selectionEnd = GoogleTVProto.intField(status, number: 4) ?? selectionStart
+        let label = fields[6].flatMap { String(data: $0, encoding: .utf8) }
+        return RemoteTextInputContext(
+            text: text,
+            selectionStart: selectionStart,
+            selectionEnd: selectionEnd,
+            label: label?.isEmpty == false ? label : nil,
+            fieldCounter: GoogleTVProto.intField(status, number: 1)
+        )
+    }
+
+    static func textInputContext(fromBatchEdit batchEdit: Data) -> RemoteTextInputContext? {
+        guard let editInfo = GoogleTVProto.fields(batchEdit)[3],
+              let textObject = GoogleTVProto.fields(editInfo)[2] else {
+            return nil
+        }
+        let fields = GoogleTVProto.fields(textObject)
+        let text = fields[3].flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let selectionStart = GoogleTVProto.intField(textObject, number: 1) ?? text.utf16.count
+        let selectionEnd = GoogleTVProto.intField(textObject, number: 2) ?? selectionStart
+        return RemoteTextInputContext(
+            text: text,
+            selectionStart: selectionStart,
+            selectionEnd: selectionEnd,
+            fieldCounter: GoogleTVProto.intField(batchEdit, number: 2)
+        )
+    }
+
+    static func imeBatchEditMessage(
+        text: String,
+        imeCounter: Int,
+        fieldCounter: Int,
+        insert: Int
+    ) -> Data {
+        let finalPosition = max(text.utf16.count - 1, 0)
+        let textFieldStatus = GoogleTVProto.varintField(1, finalPosition)
+            + GoogleTVProto.varintField(2, finalPosition)
+            + GoogleTVProto.stringField(3, text)
+        let edit = GoogleTVProto.varintField(1, insert)
+            + GoogleTVProto.message(field: 2, payload: textFieldStatus)
+        let batch = GoogleTVProto.varintField(1, imeCounter)
+            + GoogleTVProto.varintField(2, fieldCounter)
+            + GoogleTVProto.message(field: 3, payload: edit)
+        return GoogleTVProto.message(field: 21, payload: batch)
     }
 }

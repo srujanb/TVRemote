@@ -11,12 +11,29 @@ final class RemoteCoordinator: ObservableObject {
     @Published private(set) var colorRelayDevice: RemoteDevice?
     @Published private(set) var colorRelayState = RemoteConnectionState.disconnected
     @Published private(set) var colorRelayMessage: String?
+    @Published private(set) var textInputSession: RemoteTextInputSession?
 
     private let rokuAdapter = RokuAdapter()
     private let googleTVAdapter = GoogleTVAdapter()
     private let appleTVAdapter = AppleTVAdapter()
     private var activeAdapter: TVRemoteAdapter?
     private var colorRelayAdapter: GoogleTVAdapter?
+    @Published private(set) var liveText = ""
+    private var textUpdateTask: Task<Void, Never>?
+    private var textInputDismissedAt: Date?
+
+    init() {
+        googleTVAdapter.onTextInputRequested = { [weak self] context in
+            self?.handleTextInputContext(context, automaticallyDetected: true)
+        }
+        appleTVAdapter.onTextInputRequested = { [weak self] context in
+            self?.handleTextInputContext(context, automaticallyDetected: true)
+        }
+        appleTVAdapter.onTextInputEnded = { [weak self] in
+            guard self?.textInputSession?.wasAutomaticallyDetected == true else { return }
+            self?.dismissTextInput()
+        }
+    }
 
     var capabilities: RemoteCapabilities? {
         selectedDevice.map { adapter(for: $0.platform).capabilities }
@@ -131,6 +148,10 @@ final class RemoteCoordinator: ObservableObject {
     }
 
     func disconnect() async {
+        textUpdateTask?.cancel()
+        textUpdateTask = nil
+        textInputSession = nil
+        liveText = ""
         await disconnectColorRelay(clearPreference: false)
         await activeAdapter?.disconnect()
         activeAdapter = nil
@@ -225,6 +246,80 @@ final class RemoteCoordinator: ObservableObject {
             fail(error, preserveConnection: true)
             return false
         }
+    }
+
+    func presentTextInput(
+        context: RemoteTextInputContext = RemoteTextInputContext(),
+        automaticallyDetected: Bool = false
+    ) {
+        guard isConnected, let activeAdapter else { return }
+        if automaticallyDetected,
+           let textInputDismissedAt,
+           Date().timeIntervalSince(textInputDismissedAt) < 1 {
+            return
+        }
+        guard textInputSession == nil else { return }
+
+        liveText = context.text
+        textInputSession = RemoteTextInputSession(
+            initialText: context.text,
+            fieldLabel: context.label,
+            wasAutomaticallyDetected: automaticallyDetected
+        )
+        let previousTask = textUpdateTask
+        textUpdateTask = Task { @MainActor [weak self] in
+            await previousTask?.value
+            guard !Task.isCancelled else { return }
+            do {
+                try await activeAdapter.beginTextInput()
+            } catch {
+                self?.fail(error, preserveConnection: true)
+            }
+        }
+    }
+
+    private func handleTextInputContext(
+        _ context: RemoteTextInputContext,
+        automaticallyDetected: Bool
+    ) {
+        guard textInputSession != nil else {
+            presentTextInput(
+                context: context,
+                automaticallyDetected: automaticallyDetected
+            )
+            return
+        }
+
+        if liveText != context.text {
+            liveText = context.text
+        }
+    }
+
+    func updateLiveText(_ newText: String) {
+        guard textInputSession != nil,
+              let activeAdapter,
+              newText != liveText else {
+            return
+        }
+
+        let previousText = liveText
+        liveText = newText
+        let previousTask = textUpdateTask
+        textUpdateTask = Task { @MainActor [weak self] in
+            await previousTask?.value
+            guard !Task.isCancelled else { return }
+            do {
+                try await activeAdapter.updateText(from: previousText, to: newText)
+                self?.errorMessage = nil
+            } catch {
+                self?.fail(error, preserveConnection: true)
+            }
+        }
+    }
+
+    func dismissTextInput() {
+        textInputSession = nil
+        textInputDismissedAt = Date()
     }
 
     private func discover(using adapter: TVRemoteAdapter) async -> [RemoteDevice] {

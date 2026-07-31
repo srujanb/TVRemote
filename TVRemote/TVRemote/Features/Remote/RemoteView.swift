@@ -343,20 +343,9 @@ private struct RemoteTouchpad: View {
                 RoundedRectangle(cornerRadius: 23)
                     .fill(RemotePalette.surface)
 
-                Button {
-                    send(.select)
-                } label: {
-                    RoundedRectangle(cornerRadius: 40)
-                        .fill(RemotePalette.touchpad)
-                        .frame(width: 188, height: 165)
-                        .overlay {
-                            TouchpadDots()
-                        }
-                }
-                .buttonStyle(RemotePressStyle())
+                TouchpadGestureSurface(send: send)
+                    .frame(width: 188, height: 165)
                 .position(x: width / 2, y: height / 2)
-                .accessibilityLabel("Select")
-                .accessibilityHint("Tap to select")
 
                 DirectionButton(symbol: "chevron.up", label: "Up") { send(.up) }
                     .position(x: width / 2, y: 12)
@@ -401,6 +390,64 @@ private struct RemoteTouchpad: View {
             }
         }
         .frame(height: 224)
+    }
+}
+
+private struct TouchpadGestureSurface: View {
+    @GestureState private var isPressed = false
+
+    let send: (RemoteCommand) -> Void
+
+    private let swipeThreshold: CGFloat = 16
+
+    var body: some View {
+        touchpadSurface
+            .gesture(touchGesture)
+            .accessibilityElement()
+            .accessibilityLabel("Directional touchpad")
+            .accessibilityHint("Tap to select, or swipe in a direction to navigate")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {
+                send(.select)
+            }
+    }
+
+    private var touchpadSurface: some View {
+        RoundedRectangle(cornerRadius: 40)
+            .fill(RemotePalette.touchpad)
+            .overlay {
+                TouchpadDots()
+            }
+            .scaleEffect(isPressed ? 0.985 : 1)
+            .opacity(isPressed ? 0.9 : 1)
+            .animation(.easeOut(duration: 0.12), value: isPressed)
+            .contentShape(RoundedRectangle(cornerRadius: 40))
+    }
+
+    private var touchGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .updating($isPressed) { _, isPressed, _ in
+                isPressed = true
+            }
+            .onEnded { value in
+                handleGesture(translation: value.translation)
+            }
+    }
+
+    private func handleGesture(translation: CGSize) {
+        let horizontalDistance = abs(translation.width)
+        let verticalDistance = abs(translation.height)
+
+        guard max(horizontalDistance, verticalDistance) >= swipeThreshold else {
+            send(.select)
+            return
+        }
+
+        if horizontalDistance > verticalDistance {
+            send(translation.width > 0 ? .right : .left)
+        } else {
+            send(translation.height > 0 ? .down : .up)
+        }
     }
 }
 

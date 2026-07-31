@@ -22,6 +22,7 @@ final class RemoteCoordinator: ObservableObject {
     @Published private(set) var liveText = ""
     private var textUpdateTask: Task<Void, Never>?
     private var textInputDismissedAt: Date?
+    private var hasAttemptedStartupConnection = false
 
     init() {
         googleTVAdapter.onTextInputRequested = { [weak self] context in
@@ -53,6 +54,20 @@ final class RemoteCoordinator: ObservableObject {
 
     var isColorRelayConnected: Bool {
         colorRelayState == .connected && colorRelayAdapter != nil
+    }
+
+    func prepareDeviceList() async {
+        if !hasAttemptedStartupConnection {
+            hasAttemptedStartupConnection = true
+            if let lastConnectedDevice = RecentDeviceStore.load().first {
+                await connect(to: lastConnectedDevice)
+                if isConnected || state == .pairing {
+                    return
+                }
+            }
+        }
+
+        await refresh()
     }
 
     func refresh() async {

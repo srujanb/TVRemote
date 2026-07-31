@@ -64,7 +64,7 @@ struct DeviceListView: View {
             }
         }
         .task {
-            await coordinator.refresh()
+            await coordinator.prepareDeviceList()
         }
         .sheet(isPresented: $showsManualEntry) {
             ManualDeviceView { name, host, platform in

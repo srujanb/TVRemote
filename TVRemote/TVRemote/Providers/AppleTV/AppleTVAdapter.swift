@@ -7,14 +7,17 @@ final class AppleTVAdapter: TVRemoteAdapter {
     let capabilities = RemoteCapabilities.appleTV
     var onTextInputRequested: ((RemoteTextInputContext) -> Void)?
     var onTextInputEnded: (() -> Void)?
+    var onConnectionEvent: ((RemoteAdapterConnectionEvent) -> Void)?
 
     private let manager = AppleTVManager()
+    private let discoveryManager = AppleTVManager()
     private var keyboardMonitorTask: Task<Void, Never>?
 
     func discover(timeout: TimeInterval) async throws -> [RemoteDevice] {
-        manager.startScanning()
+        discoveryManager.startScanning()
+        defer { discoveryManager.stopScanning() }
         try await Task.sleep(for: .seconds(timeout))
-        let devices = manager.discoveredDevices.map {
+        return discoveryManager.discoveredDevices.map {
             RemoteDevice(
                 id: "appleTV:\($0.id)",
                 name: $0.name,
@@ -24,8 +27,6 @@ final class AppleTVAdapter: TVRemoteAdapter {
                 serviceName: $0.name
             )
         }
-        manager.stopScanning()
-        return devices
     }
 
     func connect(to device: RemoteDevice) async throws -> ConnectionOutcome {
@@ -132,17 +133,34 @@ final class AppleTVAdapter: TVRemoteAdapter {
         keyboardMonitorTask?.cancel()
         keyboardMonitorTask = Task { @MainActor [weak self] in
             var wasFocused = false
-            while let self,
-                  !Task.isCancelled,
-                  self.manager.connectionStatus == .connected {
-                let isFocused = self.manager.keyboardFocused
-                if isFocused && !wasFocused {
-                    self.onTextInputRequested?(RemoteTextInputContext())
-                } else if !isFocused && wasFocused {
-                    self.onTextInputEnded?()
+            while let self, !Task.isCancelled {
+                switch self.manager.connectionStatus {
+                case .connected:
+                    let isFocused = self.manager.keyboardFocused
+                    if isFocused && !wasFocused {
+                        self.onTextInputRequested?(RemoteTextInputContext())
+                    } else if !isFocused && wasFocused {
+                        self.onTextInputEnded?()
+                    }
+                    wasFocused = isFocused
+
+                case .disconnected:
+                    self.onConnectionEvent?(.lost("The Apple TV connection was closed."))
+                    return
+
+                case .error(let message):
+                    self.onConnectionEvent?(.lost(message))
+                    return
+
+                case .connecting, .pairing:
+                    break
                 }
-                wasFocused = isFocused
-                try? await Task.sleep(for: .milliseconds(200))
+
+                do {
+                    try await Task.sleep(for: .milliseconds(200))
+                } catch {
+                    return
+                }
             }
         }
     }

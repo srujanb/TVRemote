@@ -5,6 +5,7 @@ struct PairingView: View {
     @Binding var code: String
     let errorMessage: String?
     let onSubmit: () -> Void
+    let onCancel: () -> Void
 
     var body: some View {
         NavigationStack {
@@ -54,6 +55,11 @@ struct PairingView: View {
             .padding(28)
             .navigationTitle("Pair TV")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                }
+            }
         }
         .presentationDetents([.medium])
         .interactiveDismissDisabled()

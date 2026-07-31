@@ -120,14 +120,24 @@ enum ConnectionOutcome: Equatable, Sendable {
     case pairingRequired(PairingPrompt)
 }
 
+enum RemoteAdapterConnectionEvent: Equatable, Sendable {
+    case lost(String)
+    case restored
+}
+
+@MainActor
 protocol TVRemoteAdapter: AnyObject {
     var platform: TVPlatform { get }
     var capabilities: RemoteCapabilities { get }
+    var onTextInputRequested: ((RemoteTextInputContext) -> Void)? { get set }
+    var onTextInputEnded: (() -> Void)? { get set }
+    var onConnectionEvent: ((RemoteAdapterConnectionEvent) -> Void)? { get set }
 
     func discover(timeout: TimeInterval) async throws -> [RemoteDevice]
     func connect(to device: RemoteDevice) async throws -> ConnectionOutcome
     func submitPIN(_ pin: String) async throws
     func disconnect() async
+    func forgetPairing(for device: RemoteDevice)
     func send(_ command: RemoteCommand) async throws
     func sendText(_ text: String) async throws
     func beginTextInput() async throws
@@ -135,6 +145,8 @@ protocol TVRemoteAdapter: AnyObject {
 }
 
 extension TVRemoteAdapter {
+    func forgetPairing(for device: RemoteDevice) {}
+
     func beginTextInput() async throws {}
 
     func updateText(from previousText: String, to newText: String) async throws {

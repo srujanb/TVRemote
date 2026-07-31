@@ -133,14 +133,21 @@ struct ContentView: View {
                     PairingView(
                         prompt: prompt,
                         code: $pairingCode,
-                        errorMessage: coordinator.errorMessage
-                    ) {
-                        let code = pairingCode
-                        Task {
-                            await coordinator.submitPIN(code)
-                            if coordinator.isConnected { pairingCode = "" }
+                        errorMessage: coordinator.errorMessage,
+                        onSubmit: {
+                            let code = pairingCode
+                            Task {
+                                await coordinator.submitPIN(code)
+                                if coordinator.isConnected { pairingCode = "" }
+                            }
+                        },
+                        onCancel: {
+                            pairingCode = ""
+                            Task {
+                                await coordinator.cancelPairing()
+                            }
                         }
-                    }
+                    )
                 }
             }
         }

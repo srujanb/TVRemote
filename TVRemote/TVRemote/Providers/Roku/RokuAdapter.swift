@@ -1,9 +1,13 @@
 import Darwin
 import Foundation
 
+@MainActor
 final class RokuAdapter: TVRemoteAdapter {
     let platform = TVPlatform.roku
-    let capabilities = RemoteCapabilities.roku
+    private(set) var capabilities = RemoteCapabilities.roku
+    var onTextInputRequested: ((RemoteTextInputContext) -> Void)?
+    var onTextInputEnded: (() -> Void)?
+    var onConnectionEvent: ((RemoteAdapterConnectionEvent) -> Void)?
 
     private let session: URLSession
     private var baseURL: URL?
@@ -42,12 +46,15 @@ final class RokuAdapter: TVRemoteAdapter {
         let requestURL = url.appendingPathComponent("query/device-info")
         var request = URLRequest(url: requestURL)
         request.timeoutInterval = 4
-        let (_, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw TVRemoteError.connectionFailed(
                 "Could not reach the Roku. Confirm both devices use the same Wi-Fi and “Control by mobile apps” is enabled."
             )
         }
+        capabilities = Self.capabilities(
+            fromDeviceInfoXML: String(decoding: data, as: UTF8.self)
+        )
         baseURL = url
         return .connected
     }
@@ -58,6 +65,7 @@ final class RokuAdapter: TVRemoteAdapter {
 
     func disconnect() async {
         baseURL = nil
+        capabilities = .roku
     }
 
     func send(_ command: RemoteCommand) async throws {
@@ -101,12 +109,17 @@ final class RokuAdapter: TVRemoteAdapter {
         guard let url = URL(string: pathComponent, relativeTo: baseURL)?.absoluteURL else {
             throw TVRemoteError.protocolFailure("Could not create the Roku command URL.")
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 3
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw TVRemoteError.connectionFailed("The Roku rejected the command.")
+        do {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 3
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw TVRemoteError.connectionFailed("The Roku rejected the command.")
+            }
+        } catch {
+            onConnectionEvent?(.lost(error.localizedDescription))
+            throw error
         }
     }
 
@@ -126,6 +139,25 @@ final class RokuAdapter: TVRemoteAdapter {
         guard !trimmed.isEmpty else { return nil }
         let bracketed = trimmed.contains(":") && !trimmed.hasPrefix("[") ? "[\(trimmed)]" : trimmed
         return URL(string: "http://\(bracketed):\(port)/")
+    }
+
+    static func capabilities(fromDeviceInfoXML xml: String) -> RemoteCapabilities {
+        let isTV = RokuDeviceInfoParser.value(for: "is-tv", in: xml) == "true"
+        let supportsPower = isTV
+            || RokuDeviceInfoParser.value(for: "supports-tv-power-control", in: xml) == "true"
+        let supportsVolume = isTV
+            || RokuDeviceInfoParser.value(for: "supports-audio-volume-control", in: xml) == "true"
+        let supportsTuner = RokuDeviceInfoParser.value(for: "supports-tv-tuner", in: xml) == "true"
+
+        return RemoteCapabilities(
+            supportsKeyboard: true,
+            supportsColorButtons: false,
+            supportsVolume: supportsVolume,
+            supportsPower: supportsPower,
+            supportsChannel: supportsTuner,
+            supportsNumberPad: true,
+            extraCommands: [.menu, .search]
+        )
     }
 
     static func keyName(for command: RemoteCommand) -> String? {

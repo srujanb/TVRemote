@@ -28,6 +28,7 @@ struct DeviceListView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .disabled(connectionInProgress)
                         .swipeActions {
                             Button("Forget", role: .destructive) {
                                 coordinator.forget(device)
@@ -110,6 +111,10 @@ struct DeviceListView: View {
         default:
             return true
         }
+    }
+
+    private var connectionInProgress: Bool {
+        coordinator.state == .connecting || coordinator.state == .pairing
     }
 }
 

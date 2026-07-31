@@ -34,9 +34,9 @@ struct RemoteCapabilities: Equatable, Sendable {
     static let roku = RemoteCapabilities(
         supportsKeyboard: true,
         supportsColorButtons: false,
-        supportsVolume: true,
-        supportsPower: true,
-        supportsChannel: true,
+        supportsVolume: false,
+        supportsPower: false,
+        supportsChannel: false,
         supportsNumberPad: true,
         extraCommands: [.menu, .search]
     )

@@ -11,8 +11,10 @@ final class GoogleTVAdapter: TVRemoteAdapter {
     let platform = TVPlatform.googleTV
     let capabilities = RemoteCapabilities.googleTV
     var onTextInputRequested: ((RemoteTextInputContext) -> Void)?
+    var onTextInputEnded: (() -> Void)?
+    var onConnectionEvent: ((RemoteAdapterConnectionEvent) -> Void)?
 
-    private enum Mode {
+    private enum Mode: Sendable {
         case pairing
         case remote
     }
@@ -30,15 +32,21 @@ final class GoogleTVAdapter: TVRemoteAdapter {
     private lazy var identity = GoogleTVIdentityStore.loadIdentity()
     private var connection: NWConnection?
     private var receiveBuffer = Data()
-    private var serverCertificate: SecCertificate?
+    private var serverCertificateData: Data?
     private var currentDevice: RemoteDevice?
     private var mode = Mode.remote
     private var sessionState = SessionState.idle
+    private var activeRemoteFeatures = GoogleTVAdapter.requestedRemoteFeatures
+    private var pendingTrustFailureMessage: String?
     private var imeCounter = 0
     private var imeFieldCounter = 0
     private var shouldReconnect = false
     private var reconnectAttempts = 0
     private var reconnectTask: Task<Void, Never>?
+
+    // Feature bits used by the Android TV Remote v2 protocol:
+    // ping, key input, IME, power, volume, and app links.
+    static let requestedRemoteFeatures = 1 | 2 | 4 | 32 | 64 | 512
 
     func discover(timeout: TimeInterval) async throws -> [RemoteDevice] {
         let services = await BonjourServiceScanner.scan(
@@ -67,12 +75,8 @@ final class GoogleTVAdapter: TVRemoteAdapter {
         imeFieldCounter = 0
         if KeychainStore.load(account: pairingAccount(for: device)) != nil {
             open(host: device.host, port: device.port ?? 6466, mode: .remote)
-            do {
-                try await wait(for: { $0 == .connected }, timeout: 6)
-                return .connected
-            } catch {
-                KeychainStore.delete(account: pairingAccount(for: device))
-            }
+            try await wait(for: { $0 == .connected }, timeout: 6)
+            return .connected
         }
 
         open(host: device.host, port: 6467, mode: .pairing)
@@ -92,7 +96,11 @@ final class GoogleTVAdapter: TVRemoteAdapter {
         guard normalized.count == 6 else {
             throw TVRemoteError.invalidPIN("The Google TV code must contain six hexadecimal characters.")
         }
-        guard let identity, let serverCertificate,
+        guard let identity, let serverCertificateData,
+              let serverCertificate = SecCertificateCreateWithData(
+                nil,
+                serverCertificateData as CFData
+              ),
               let digest = GoogleTVPairingSecret.make(
                 pin: normalized,
                 identity: identity,
@@ -104,6 +112,10 @@ final class GoogleTVAdapter: TVRemoteAdapter {
         sendPayload(GoogleTVPairingMessage.secret(digest))
         try await wait(for: { $0 == .paired }, timeout: 8)
         guard let device = currentDevice else { throw TVRemoteError.notConnected }
+        try KeychainStore.save(
+            serverCertificateData,
+            account: serverCertificateAccount(for: device)
+        )
         try KeychainStore.save(Data([1]), account: pairingAccount(for: device))
 
         open(host: device.host, port: device.port ?? 6466, mode: .remote)
@@ -119,8 +131,16 @@ final class GoogleTVAdapter: TVRemoteAdapter {
         receiveBuffer.removeAll()
         currentDevice = nil
         sessionState = .idle
+        serverCertificateData = nil
+        pendingTrustFailureMessage = nil
+        activeRemoteFeatures = Self.requestedRemoteFeatures
         imeCounter = 0
         imeFieldCounter = 0
+    }
+
+    func forgetPairing(for device: RemoteDevice) {
+        KeychainStore.delete(account: pairingAccount(for: device))
+        KeychainStore.delete(account: serverCertificateAccount(for: device))
     }
 
     func send(_ command: RemoteCommand) async throws {
@@ -173,22 +193,61 @@ final class GoogleTVAdapter: TVRemoteAdapter {
             sessionState = .failed("Google TV pairing identity is unavailable.")
             return
         }
+        guard let networkIdentity = sec_identity_create(identity) else {
+            sessionState = .failed("The Google TV pairing identity is invalid.")
+            return
+        }
+        guard let networkPort = NWEndpoint.Port(rawValue: port) else {
+            sessionState = .failed("The Google TV port is invalid.")
+            return
+        }
+
         connection?.cancel()
         receiveBuffer.removeAll()
         sessionState = .opening
         self.mode = mode
+        pendingTrustFailureMessage = nil
+        activeRemoteFeatures = Self.requestedRemoteFeatures
+
+        let expectedServerCertificate = mode == .remote
+            ? currentDevice.flatMap {
+                KeychainStore.load(account: serverCertificateAccount(for: $0))
+            }
+            : nil
 
         let tls = NWProtocolTLS.Options()
         let securityOptions = tls.securityProtocolOptions
-        sec_protocol_options_set_local_identity(securityOptions, sec_identity_create(identity)!)
+        sec_protocol_options_set_local_identity(securityOptions, networkIdentity)
         sec_protocol_options_set_verify_block(
             securityOptions,
             { [weak self] _, trust, complete in
+                let certificateData: Data?
                 if let secTrust = sec_trust_copy_ref(trust).takeRetainedValue() as SecTrust?,
                    let chain = SecTrustCopyCertificateChain(secTrust) as? [SecCertificate] {
-                    self?.serverCertificate = chain.first
+                    certificateData = chain.first.map {
+                        SecCertificateCopyData($0) as Data
+                    }
+                } else {
+                    certificateData = nil
                 }
-                complete(true)
+
+                let certificateMatches = expectedServerCertificate == nil
+                    || expectedServerCertificate == certificateData
+                let shouldTrust = certificateData != nil
+                    && (mode == .pairing || certificateMatches)
+
+                Task { @MainActor in
+                    guard let self else {
+                        complete(false)
+                        return
+                    }
+                    self.serverCertificateData = certificateData
+                    if !shouldTrust {
+                        self.pendingTrustFailureMessage =
+                            "The Google TV identity changed. Forget the device and pair it again if the TV was reset."
+                    }
+                    complete(shouldTrust)
+                }
             },
             networkQueue
         )
@@ -196,7 +255,7 @@ final class GoogleTVAdapter: TVRemoteAdapter {
         let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
         let connection = NWConnection(
             host: NWEndpoint.Host(host),
-            port: NWEndpoint.Port(rawValue: port)!,
+            port: networkPort,
             using: parameters
         )
         self.connection = connection
@@ -214,7 +273,7 @@ final class GoogleTVAdapter: TVRemoteAdapter {
                 sendPayload(GoogleTVPairingMessage.request(clientName: UIDevice.current.name))
             }
         case .failed(let error):
-            handleSessionFailure(error.localizedDescription)
+            handleSessionFailure(pendingTrustFailureMessage ?? error.localizedDescription)
         case .cancelled:
             break
         default:
@@ -271,19 +330,24 @@ final class GoogleTVAdapter: TVRemoteAdapter {
             return
         }
 
-        if fields[1] != nil {
+        if let configure = fields[1] {
+            let supportedFeatures = GoogleTVProto.intField(configure, number: 1)
+                ?? Self.requestedRemoteFeatures
+            activeRemoteFeatures = Self.negotiatedRemoteFeatures(
+                supported: supportedFeatures
+            )
             let client = GoogleTVProto.varintField(3, 1)
                 + GoogleTVProto.stringField(4, "1")
                 + GoogleTVProto.stringField(5, "ios-tv-remote")
                 + GoogleTVProto.stringField(6, "1.0")
-            let response = GoogleTVProto.varintField(1, 622)
+            let response = GoogleTVProto.varintField(1, activeRemoteFeatures)
                 + GoogleTVProto.message(field: 2, payload: client)
             sendPayload(GoogleTVProto.message(field: 1, payload: response))
         } else if fields[2] != nil {
             sendPayload(
                 GoogleTVProto.message(
                     field: 2,
-                    payload: GoogleTVProto.varintField(1, 622)
+                    payload: GoogleTVProto.varintField(1, activeRemoteFeatures)
                 )
             )
         } else if let ping = fields[8] {
@@ -308,12 +372,15 @@ final class GoogleTVAdapter: TVRemoteAdapter {
                 handleTextInputContext(context, source: "IME batch-edit status")
             }
         } else if let showRequest = fields[22] {
-            if let context = Self.textInputContext(fromContainer: showRequest) {
-                handleTextInputContext(context, source: "IME show request")
-            }
+            handleTextInputContext(
+                Self.textInputContext(fromShowRequest: showRequest),
+                source: "IME show request"
+            )
         } else if fields[40] != nil {
             reconnectAttempts = 0
             sessionState = .connected
+            persistServerCertificateIfNeeded()
+            onConnectionEvent?(.restored)
         }
     }
 
@@ -341,6 +408,13 @@ final class GoogleTVAdapter: TVRemoteAdapter {
     }
 
     private func handleSessionFailure(_ message: String) {
+        if pendingTrustFailureMessage != nil {
+            shouldReconnect = false
+            sessionState = .failed(message)
+            onConnectionEvent?(.lost(message))
+            return
+        }
+
         let wasConnected = sessionState == .connected
         guard mode == .remote,
               shouldReconnect,
@@ -350,7 +424,9 @@ final class GoogleTVAdapter: TVRemoteAdapter {
             return
         }
         guard reconnectAttempts < 3 else {
-            sessionState = .failed("Lost the Google TV connection after three reconnect attempts.")
+            let message = "Lost the Google TV connection after three reconnect attempts."
+            sessionState = .failed(message)
+            onConnectionEvent?(.lost(message))
             return
         }
 
@@ -379,8 +455,33 @@ final class GoogleTVAdapter: TVRemoteAdapter {
         throw TVRemoteError.timedOut("The TV did not respond in time.")
     }
 
+    private func persistServerCertificateIfNeeded() {
+        guard let currentDevice, let serverCertificateData,
+              KeychainStore.load(account: serverCertificateAccount(for: currentDevice)) == nil else {
+            return
+        }
+        do {
+            try KeychainStore.save(
+                serverCertificateData,
+                account: serverCertificateAccount(for: currentDevice)
+            )
+        } catch {
+            googleTVLog.error(
+                "Could not pin Google TV certificate: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
     private func pairingAccount(for device: RemoteDevice) -> String {
         "google-tv.paired.\(device.id)"
+    }
+
+    private func serverCertificateAccount(for device: RemoteDevice) -> String {
+        "google-tv.server-certificate.\(device.id)"
+    }
+
+    static func negotiatedRemoteFeatures(supported: Int) -> Int {
+        supported & requestedRemoteFeatures
     }
 
     static func keyCode(for command: RemoteCommand) -> Int {
@@ -448,6 +549,12 @@ final class GoogleTVAdapter: TVRemoteAdapter {
             label: label?.isEmpty == false ? label : nil,
             fieldCounter: GoogleTVProto.intField(status, number: 1)
         )
+    }
+
+    static func textInputContext(fromShowRequest showRequest: Data) -> RemoteTextInputContext {
+        // Some Android TV Remote Service versions send an empty show request.
+        // The message itself still means a TV text field gained focus.
+        textInputContext(fromContainer: showRequest) ?? RemoteTextInputContext()
     }
 
     static func textInputContext(fromBatchEdit batchEdit: Data) -> RemoteTextInputContext? {

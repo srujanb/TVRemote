@@ -56,11 +56,7 @@ struct NumberPadView: View {
     }
 
     private var capabilities: RemoteCapabilities {
-        switch device.platform {
-        case .roku: .roku
-        case .googleTV: .googleTV
-        case .appleTV: .appleTV
-        }
+        coordinator.capabilities ?? .roku
     }
 
     private func send(_ command: RemoteCommand) {
@@ -159,11 +155,7 @@ struct AdditionalRemotePage: View {
     }
 
     private var capabilities: RemoteCapabilities {
-        switch device.platform {
-        case .roku: .roku
-        case .googleTV: .googleTV
-        case .appleTV: .appleTV
-        }
+        coordinator.capabilities ?? .roku
     }
 
     private var supportedExtraControls: [ExtraControl] {

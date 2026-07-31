@@ -2,6 +2,7 @@ import XCTest
 @testable import TVRemote
 
 final class TVRemoteTests: XCTestCase {
+    @MainActor
     func testRokuCommandMapping() {
         XCTAssertEqual(RokuAdapter.keyName(for: .home), "Home")
         XCTAssertEqual(RokuAdapter.keyName(for: .playPause), "Play")
@@ -14,6 +15,7 @@ final class TVRemoteTests: XCTestCase {
         XCTAssertNil(RokuAdapter.keyName(for: .input))
     }
 
+    @MainActor
     func testRokuBaseURLSupportsIPv4AndIPv6() {
         XCTAssertEqual(
             RokuAdapter.baseURL(host: "192.168.1.20", port: 8060)?.absoluteString,
@@ -89,6 +91,32 @@ final class TVRemoteTests: XCTestCase {
         XCTAssertEqual(context?.selectionEnd, 5)
         XCTAssertEqual(context?.label, "Search")
         XCTAssertEqual(context?.fieldCounter, 7)
+    }
+
+    func testGoogleTVEmptyShowRequestStillDetectsTextInput() async {
+        let context = await MainActor.run {
+            GoogleTVAdapter.textInputContext(fromShowRequest: Data())
+        }
+
+        XCTAssertEqual(context, RemoteTextInputContext())
+    }
+
+    func testGoogleTVNegotiatesAdvertisedIMEFeatures() async {
+        let values = await MainActor.run {
+            let allRequested = GoogleTVAdapter.requestedRemoteFeatures
+            return (
+                allRequested,
+                GoogleTVAdapter.negotiatedRemoteFeatures(
+                    supported: allRequested | (1 << 12)
+                ),
+                GoogleTVAdapter.negotiatedRemoteFeatures(
+                    supported: allRequested & ~4
+                )
+            )
+        }
+
+        XCTAssertEqual(values.1, values.0)
+        XCTAssertEqual(values.2 & 4, 0)
     }
 
     func testGoogleTVTextInputBatchEditDecoding() async {
@@ -178,6 +206,24 @@ final class TVRemoteTests: XCTestCase {
         XCTAssertFalse(RemoteCapabilities.appleTV.supportsNumberPad)
     }
 
+    @MainActor
+    func testRokuCapabilitiesComeFromDeviceInfo() {
+        let xml = """
+        <device-info>
+            <is-tv>false</is-tv>
+            <supports-tv-power-control>true</supports-tv-power-control>
+            <supports-audio-volume-control>true</supports-audio-volume-control>
+            <supports-tv-tuner>false</supports-tv-tuner>
+        </device-info>
+        """
+        let capabilities = RokuAdapter.capabilities(fromDeviceInfoXML: xml)
+
+        XCTAssertTrue(capabilities.supportsPower)
+        XCTAssertTrue(capabilities.supportsVolume)
+        XCTAssertFalse(capabilities.supportsChannel)
+        XCTAssertTrue(capabilities.supportsNumberPad)
+    }
+
     func testRefreshReconcilesManualGoogleTVWithBonjourDiscovery() async {
         let recent = RemoteDevice(
             name: "Living Room",
@@ -216,5 +262,211 @@ final class TVRemoteTests: XCTestCase {
 
         ColorRelayStore.removeReferences(to: relayID)
         XCTAssertNil(ColorRelayStore.relayDeviceID(for: primaryID))
+    }
+
+    @MainActor
+    func testCloseTVKeyboardFlushesTextAndKeepsPhoneEditorOpen() async {
+        let roku = TestRemoteAdapter(platform: .roku)
+        let coordinator = makeCoordinator(roku: roku)
+        let device = RemoteDevice(
+            name: "Test Roku",
+            host: "192.0.2.10",
+            platform: .roku
+        )
+
+        await coordinator.connect(to: device)
+        coordinator.presentTextInput()
+        coordinator.updateLiveText("hello")
+        await coordinator.closeTVKeyboard()
+
+        XCTAssertEqual(
+            Array(roku.events.suffix(3)),
+            ["beginTextInput", "update:->hello", "send:back"]
+        )
+        XCTAssertNotNil(
+            coordinator.textInputSession,
+            "Closing the TV keyboard must keep the phone editor open."
+        )
+        XCTAssertEqual(coordinator.liveText, "hello")
+        RecentDeviceStore.remove(device)
+    }
+
+    @MainActor
+    func testLatestConnectionAttemptWins() async {
+        let roku = TestRemoteAdapter(platform: .roku, suspendsConnection: true)
+        let google = TestRemoteAdapter(platform: .googleTV, suspendsConnection: true)
+        let coordinator = makeCoordinator(roku: roku, google: google)
+        let rokuDevice = RemoteDevice(
+            name: "Slow Roku",
+            host: "192.0.2.11",
+            platform: .roku
+        )
+        let googleDevice = RemoteDevice(
+            name: "Fast Google TV",
+            host: "192.0.2.12",
+            platform: .googleTV
+        )
+
+        let firstConnect = Task { await coordinator.connect(to: rokuDevice) }
+        while !roku.hasPendingConnection { await Task.yield() }
+
+        let secondConnect = Task { await coordinator.connect(to: googleDevice) }
+        while !google.hasPendingConnection { await Task.yield() }
+
+        google.completeConnection(with: .connected)
+        await secondConnect.value
+        roku.completeConnection(with: .connected)
+        await firstConnect.value
+
+        XCTAssertEqual(coordinator.selectedDevice, googleDevice)
+        XCTAssertEqual(coordinator.state, .connected)
+
+        await coordinator.send(.home)
+        XCTAssertTrue(google.events.contains("send:home"))
+        XCTAssertFalse(roku.events.contains("send:home"))
+        RecentDeviceStore.remove(rokuDevice)
+        RecentDeviceStore.remove(googleDevice)
+    }
+
+    @MainActor
+    func testAdapterConnectionLossExitsConnectedUI() async {
+        let google = TestRemoteAdapter(platform: .googleTV)
+        let coordinator = makeCoordinator(google: google)
+        let device = RemoteDevice(
+            name: "Google TV",
+            host: "192.0.2.13",
+            platform: .googleTV
+        )
+
+        await coordinator.connect(to: device)
+        google.emitConnectionEvent(.lost("Connection dropped"))
+
+        XCTAssertEqual(coordinator.state, .failed("Connection dropped"))
+        XCTAssertFalse(coordinator.isConnected)
+        XCTAssertEqual(coordinator.errorMessage, "Connection dropped")
+        RecentDeviceStore.remove(device)
+    }
+
+    @MainActor
+    func testPairingCanBeCancelledCleanly() async {
+        let prompt = PairingPrompt(
+            title: "Pair",
+            message: "Enter code",
+            placeholder: "A1B2C3",
+            keyboard: .hexadecimal
+        )
+        let google = TestRemoteAdapter(
+            platform: .googleTV,
+            connectionOutcome: .pairingRequired(prompt)
+        )
+        let coordinator = makeCoordinator(google: google)
+        let device = RemoteDevice(
+            name: "Unpaired Google TV",
+            host: "192.0.2.14",
+            platform: .googleTV
+        )
+
+        await coordinator.connect(to: device)
+        XCTAssertEqual(coordinator.state, .pairing)
+
+        await coordinator.cancelPairing()
+
+        XCTAssertEqual(coordinator.state, .disconnected)
+        XCTAssertNil(coordinator.pairingPrompt)
+        XCTAssertNil(coordinator.selectedDevice)
+    }
+
+    @MainActor
+    private func makeCoordinator(
+        roku: TestRemoteAdapter? = nil,
+        google: TestRemoteAdapter? = nil,
+        apple: TestRemoteAdapter? = nil
+    ) -> RemoteCoordinator {
+        let roku = roku ?? TestRemoteAdapter(platform: .roku)
+        let google = google ?? TestRemoteAdapter(platform: .googleTV)
+        let apple = apple ?? TestRemoteAdapter(platform: .appleTV)
+        return RemoteCoordinator(
+            rokuAdapter: roku,
+            googleTVAdapter: google,
+            appleTVAdapter: apple,
+            initialDevices: [],
+            colorRelayAdapterFactory: { TestRemoteAdapter(platform: .googleTV) }
+        )
+    }
+}
+
+@MainActor
+private final class TestRemoteAdapter: TVRemoteAdapter {
+    let platform: TVPlatform
+    let capabilities: RemoteCapabilities
+    var onTextInputRequested: ((RemoteTextInputContext) -> Void)?
+    var onTextInputEnded: (() -> Void)?
+    var onConnectionEvent: ((RemoteAdapterConnectionEvent) -> Void)?
+    private(set) var events: [String] = []
+    private var connectContinuation: CheckedContinuation<ConnectionOutcome, Error>?
+    private let suspendsConnection: Bool
+    private let connectionOutcome: ConnectionOutcome
+
+    var hasPendingConnection: Bool {
+        connectContinuation != nil
+    }
+
+    init(
+        platform: TVPlatform,
+        suspendsConnection: Bool = false,
+        connectionOutcome: ConnectionOutcome = .connected
+    ) {
+        self.platform = platform
+        self.suspendsConnection = suspendsConnection
+        self.connectionOutcome = connectionOutcome
+        capabilities = switch platform {
+        case .roku: .roku
+        case .googleTV: .googleTV
+        case .appleTV: .appleTV
+        }
+    }
+
+    func discover(timeout: TimeInterval) async throws -> [RemoteDevice] {
+        []
+    }
+
+    func connect(to device: RemoteDevice) async throws -> ConnectionOutcome {
+        events.append("connect:\(device.id)")
+        guard suspendsConnection else { return connectionOutcome }
+        return try await withCheckedThrowingContinuation { continuation in
+            connectContinuation = continuation
+        }
+    }
+
+    func completeConnection(with outcome: ConnectionOutcome) {
+        let continuation = connectContinuation
+        connectContinuation = nil
+        continuation?.resume(returning: outcome)
+    }
+
+    func emitConnectionEvent(_ event: RemoteAdapterConnectionEvent) {
+        onConnectionEvent?(event)
+    }
+
+    func submitPIN(_ pin: String) async throws {}
+
+    func disconnect() async {
+        events.append("disconnect")
+    }
+
+    func send(_ command: RemoteCommand) async throws {
+        events.append("send:\(command.rawValue)")
+    }
+
+    func sendText(_ text: String) async throws {
+        events.append("sendText:\(text)")
+    }
+
+    func beginTextInput() async throws {
+        events.append("beginTextInput")
+    }
+
+    func updateText(from previousText: String, to newText: String) async throws {
+        events.append("update:\(previousText)->\(newText)")
     }
 }

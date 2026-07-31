@@ -1,0 +1,10 @@
+.DS_Store
+DerivedData/
+**/*DerivedData*/
+.build/
+build/
+*.xcresult
+*.xcuserstate
+xcuserdata/
+TVRemote/TVRemote.xcodeproj/project.xcworkspace/xcuserdata/
+TVRemote/TVRemote.xcodeproj/xcuserdata/

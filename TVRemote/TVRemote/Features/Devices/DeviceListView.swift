@@ -22,7 +22,10 @@ struct DeviceListView: View {
                         Button {
                             Task { await coordinator.connect(to: device) }
                         } label: {
-                            DeviceRow(device: device)
+                            DeviceRow(
+                                device: device,
+                                showsUnavailableStatus: showsUnavailableStatus(for: device)
+                            )
                         }
                         .buttonStyle(.plain)
                         .swipeActions {
@@ -89,10 +92,30 @@ struct DeviceListView: View {
         }
         .accessibilityElement(children: .combine)
     }
+
+    private func showsUnavailableStatus(for device: RemoteDevice) -> Bool {
+        guard coordinator.hasCompletedDeviceRefresh,
+              !coordinator.isRefreshingDevices,
+              !coordinator.availableDeviceIDs.contains(device.id) else {
+            return false
+        }
+
+        guard coordinator.selectedDevice?.id == device.id else {
+            return true
+        }
+
+        switch coordinator.state {
+        case .connecting, .pairing, .connected:
+            return false
+        default:
+            return true
+        }
+    }
 }
 
 private struct DeviceRow: View {
     let device: RemoteDevice
+    let showsUnavailableStatus: Bool
 
     var body: some View {
         HStack(spacing: 14) {
@@ -106,6 +129,11 @@ private struct DeviceRow: View {
                 Text("\(device.platform.displayName) · \(device.host)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if showsUnavailableStatus {
+                    Label("Currently unavailable", systemImage: "wifi.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
             Image(systemName: "chevron.right")

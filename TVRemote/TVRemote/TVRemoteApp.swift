@@ -25,7 +25,8 @@ struct ContentView: View {
                             coordinator: coordinator,
                             device: device,
                             onShowSettings: { presentedSheet = .settings },
-                            onShowDevices: { presentedSheet = .devices }
+                            onShowDevices: { presentedSheet = .devices },
+                            onShowControls: { presentedSheet = .numberPad }
                         )
                     } else {
                         DeviceListView(coordinator: coordinator)
@@ -109,6 +110,24 @@ struct ContentView: View {
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
 
+            case .numberPad:
+                if let device = coordinator.selectedDevice {
+                    NavigationStack {
+                        NumberPadView(
+                            coordinator: coordinator,
+                            device: device
+                        )
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { presentedSheet = nil }
+                            }
+                        }
+                    }
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(28)
+                }
+
             case .pairing:
                 if let prompt = coordinator.pairingPrompt {
                     PairingView(
@@ -131,6 +150,7 @@ struct ContentView: View {
 private enum RemoteSheet: String, Identifiable {
     case devices
     case settings
+    case numberPad
     case pairing
 
     var id: String { rawValue }

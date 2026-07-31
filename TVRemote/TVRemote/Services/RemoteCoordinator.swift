@@ -6,6 +6,8 @@ final class RemoteCoordinator: ObservableObject {
     @Published private(set) var selectedDevice: RemoteDevice?
     @Published private(set) var state = RemoteConnectionState.disconnected
     @Published private(set) var isRefreshingDevices = false
+    @Published private(set) var hasCompletedDeviceRefresh = false
+    @Published private(set) var availableDeviceIDs: Set<String> = []
     @Published var pairingPrompt: PairingPrompt?
     @Published var errorMessage: String?
     @Published var statusMessage = "Choose a TV to begin."
@@ -87,11 +89,20 @@ final class RemoteCoordinator: ObservableObject {
 
         guard !Task.isCancelled else { return }
 
-        var unique: [String: RemoteDevice] = [:]
-        for device in RecentDeviceStore.load() + found {
-            unique[device.id] = device
-        }
-        devices = unique.values.sorted {
+        let refreshedDevices = Self.reconcileDevices(
+            recent: RecentDeviceStore.load(),
+            discovered: found,
+            connectedDevice: isConnected ? selectedDevice : nil
+        )
+        availableDeviceIDs = refreshedDevices.availableIDs
+        hasCompletedDeviceRefresh = true
+
+        devices = refreshedDevices.devices.sorted {
+            let firstIsAvailable = refreshedDevices.availableIDs.contains($0.id)
+            let secondIsAvailable = refreshedDevices.availableIDs.contains($1.id)
+            if firstIsAvailable != secondIsAvailable {
+                return firstIsAvailable
+            }
             if $0.platform == $1.platform {
                 return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
@@ -108,6 +119,85 @@ final class RemoteCoordinator: ObservableObject {
         } else if preserveConnection, state == .connected {
             statusMessage = discoveryMessage
         }
+    }
+
+    static func reconcileDevices(
+        recent: [RemoteDevice],
+        discovered: [RemoteDevice],
+        connectedDevice: RemoteDevice?
+    ) -> (devices: [RemoteDevice], availableIDs: Set<String>) {
+        var devices: [RemoteDevice] = []
+        var availableIDs = Set<String>()
+        var consumedDiscoveryIndexes = Set<Int>()
+
+        for recentDevice in recent {
+            guard !devices.contains(where: { representsSameDevice($0, recentDevice) }) else {
+                continue
+            }
+
+            if let matchIndex = discovered.indices.first(where: {
+                !consumedDiscoveryIndexes.contains($0)
+                    && representsSameDevice(recentDevice, discovered[$0])
+            }) {
+                consumedDiscoveryIndexes.insert(matchIndex)
+                let match = discovered[matchIndex]
+                devices.append(
+                    RemoteDevice(
+                        id: recentDevice.id,
+                        name: recentDevice.name,
+                        host: match.host,
+                        port: match.port,
+                        platform: match.platform,
+                        serviceName: match.serviceName ?? recentDevice.serviceName
+                    )
+                )
+                availableIDs.insert(recentDevice.id)
+            } else {
+                devices.append(recentDevice)
+            }
+        }
+
+        for index in discovered.indices where !consumedDiscoveryIndexes.contains(index) {
+            let discoveredDevice = discovered[index]
+            if let existingDevice = devices.first(where: {
+                representsSameDevice($0, discoveredDevice)
+            }) {
+                availableIDs.insert(existingDevice.id)
+            } else {
+                devices.append(discoveredDevice)
+                availableIDs.insert(discoveredDevice.id)
+            }
+        }
+
+        if let connectedDevice {
+            if let existingDevice = devices.first(where: {
+                representsSameDevice($0, connectedDevice)
+            }) {
+                availableIDs.insert(existingDevice.id)
+            } else {
+                devices.append(connectedDevice)
+                availableIDs.insert(connectedDevice.id)
+            }
+        }
+
+        return (devices, availableIDs)
+    }
+
+    private static func representsSameDevice(
+        _ first: RemoteDevice,
+        _ second: RemoteDevice
+    ) -> Bool {
+        first.id == second.id
+            || (
+                first.platform == second.platform
+                    && normalizedHost(first.host) == normalizedHost(second.host)
+            )
+    }
+
+    private static func normalizedHost(_ host: String) -> String {
+        host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")
+            .union(.whitespacesAndNewlines))
+            .lowercased()
     }
 
     func connect(to device: RemoteDevice) async {
@@ -194,6 +284,7 @@ final class RemoteCoordinator: ObservableObject {
     func forget(_ device: RemoteDevice) {
         RecentDeviceStore.remove(device)
         ColorRelayStore.removeReferences(to: device.id)
+        availableDeviceIDs.remove(device.id)
         devices.removeAll { $0.id == device.id }
         if colorRelayDevice?.id == device.id {
             Task { await disconnectColorRelay(clearPreference: false) }
@@ -392,6 +483,7 @@ final class RemoteCoordinator: ObservableObject {
 
     private func finishConnection(to device: RemoteDevice) {
         RecentDeviceStore.save(device)
+        availableDeviceIDs.insert(device.id)
         if !devices.contains(where: { $0.id == device.id }) {
             devices.append(device)
         }

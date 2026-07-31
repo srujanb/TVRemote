@@ -102,6 +102,12 @@ final class AppleTVAdapter: TVRemoteAdapter {
             throw TVRemoteError.unsupported(
                 "Apple TV does not expose native red, green, yellow, or blue commands."
             )
+        case .digit0, .digit1, .digit2, .digit3, .digit4,
+             .digit5, .digit6, .digit7, .digit8, .digit9,
+             .delete, .input, .menu, .info, .guide, .captions, .search:
+            throw TVRemoteError.unsupported(
+                "\(command.rawValue) is not supported by Apple TV."
+            )
         }
     }
 

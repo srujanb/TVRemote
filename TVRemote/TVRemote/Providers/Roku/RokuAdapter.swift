@@ -62,7 +62,9 @@ final class RokuAdapter: TVRemoteAdapter {
 
     func send(_ command: RemoteCommand) async throws {
         guard let key = Self.keyName(for: command) else {
-            throw TVRemoteError.unsupported("Roku does not expose red, green, yellow, or blue keys over Wi-Fi.")
+            throw TVRemoteError.unsupported(
+                "\(command.rawValue) is not supported by Roku over Wi-Fi."
+            )
         }
         try await post(pathComponent: "keypress/\(key)")
     }
@@ -145,6 +147,20 @@ final class RokuAdapter: TVRemoteAdapter {
         case .channelUp: "ChannelUp"
         case .channelDown: "ChannelDown"
         case .red, .green, .yellow, .blue: nil
+        case .digit0: "Lit_0"
+        case .digit1: "Lit_1"
+        case .digit2: "Lit_2"
+        case .digit3: "Lit_3"
+        case .digit4: "Lit_4"
+        case .digit5: "Lit_5"
+        case .digit6: "Lit_6"
+        case .digit7: "Lit_7"
+        case .digit8: "Lit_8"
+        case .digit9: "Lit_9"
+        case .delete: "Backspace"
+        case .menu: "Info"
+        case .search: "Search"
+        case .input, .info, .guide, .captions: nil
         }
     }
 }

@@ -6,8 +6,12 @@ final class TVRemoteTests: XCTestCase {
         XCTAssertEqual(RokuAdapter.keyName(for: .home), "Home")
         XCTAssertEqual(RokuAdapter.keyName(for: .playPause), "Play")
         XCTAssertEqual(RokuAdapter.keyName(for: .volumeUp), "VolumeUp")
+        XCTAssertEqual(RokuAdapter.keyName(for: .digit7), "Lit_7")
+        XCTAssertEqual(RokuAdapter.keyName(for: .delete), "Backspace")
+        XCTAssertEqual(RokuAdapter.keyName(for: .menu), "Info")
         XCTAssertNil(RokuAdapter.keyName(for: .red))
         XCTAssertNil(RokuAdapter.keyName(for: .blue))
+        XCTAssertNil(RokuAdapter.keyName(for: .input))
     }
 
     func testRokuBaseURLSupportsIPv4AndIPv6() {
@@ -50,6 +54,23 @@ final class TVRemoteTests: XCTestCase {
             ]
         }
         XCTAssertEqual(values, [true, true, false])
+    }
+
+    func testGoogleTVAdditionalControlKeyCodes() async {
+        let codes = await MainActor.run {
+            [
+                GoogleTVAdapter.keyCode(for: .digit0),
+                GoogleTVAdapter.keyCode(for: .digit9),
+                GoogleTVAdapter.keyCode(for: .delete),
+                GoogleTVAdapter.keyCode(for: .input),
+                GoogleTVAdapter.keyCode(for: .menu),
+                GoogleTVAdapter.keyCode(for: .info),
+                GoogleTVAdapter.keyCode(for: .guide),
+                GoogleTVAdapter.keyCode(for: .captions),
+                GoogleTVAdapter.keyCode(for: .search)
+            ]
+        }
+        XCTAssertEqual(codes, [7, 16, 67, 178, 82, 165, 172, 175, 84])
     }
 
     func testGoogleTVTextInputRequestDecoding() async {
@@ -152,6 +173,39 @@ final class TVRemoteTests: XCTestCase {
         XCTAssertFalse(RemoteCapabilities.appleTV.supportsColorButtons)
         XCTAssertTrue(RemoteCapabilities.roku.supportsKeyboard)
         XCTAssertTrue(RemoteCapabilities.appleTV.supportsKeyboard)
+        XCTAssertTrue(RemoteCapabilities.googleTV.supportsNumberPad)
+        XCTAssertTrue(RemoteCapabilities.roku.extraCommands.contains(.menu))
+        XCTAssertFalse(RemoteCapabilities.appleTV.supportsNumberPad)
+    }
+
+    func testRefreshReconcilesManualGoogleTVWithBonjourDiscovery() async {
+        let recent = RemoteDevice(
+            name: "Living Room",
+            host: "192.168.1.20",
+            port: 6466,
+            platform: .googleTV
+        )
+        let discovered = RemoteDevice(
+            name: "Android TV",
+            host: "192.168.1.20",
+            port: 6466,
+            platform: .googleTV,
+            serviceName: "Android TV"
+        )
+
+        let result = await MainActor.run {
+            RemoteCoordinator.reconcileDevices(
+                recent: [recent],
+                discovered: [discovered],
+                connectedDevice: nil
+            )
+        }
+
+        XCTAssertEqual(result.devices.count, 1)
+        XCTAssertEqual(result.devices.first?.id, recent.id)
+        XCTAssertEqual(result.devices.first?.name, recent.name)
+        XCTAssertEqual(result.devices.first?.serviceName, discovered.serviceName)
+        XCTAssertEqual(result.availableIDs, [recent.id])
     }
 
     func testColorRelayMappingPersistence() {

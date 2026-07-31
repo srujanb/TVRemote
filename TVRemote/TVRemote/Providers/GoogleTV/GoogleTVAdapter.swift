@@ -405,6 +405,23 @@ final class GoogleTVAdapter: TVRemoteAdapter {
         case .green: 184
         case .yellow: 185
         case .blue: 186
+        case .digit0: 7
+        case .digit1: 8
+        case .digit2: 9
+        case .digit3: 10
+        case .digit4: 11
+        case .digit5: 12
+        case .digit6: 13
+        case .digit7: 14
+        case .digit8: 15
+        case .digit9: 16
+        case .delete: 67
+        case .input: 178
+        case .menu: 82
+        case .info: 165
+        case .guide: 172
+        case .captions: 175
+        case .search: 84
         }
     }
 

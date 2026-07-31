@@ -25,7 +25,7 @@ struct RemoteDevice: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
-enum RemoteCommand: String, CaseIterable, Sendable {
+enum RemoteCommand: String, CaseIterable, Hashable, Sendable {
     case up
     case down
     case left
@@ -46,6 +46,23 @@ enum RemoteCommand: String, CaseIterable, Sendable {
     case green
     case yellow
     case blue
+    case digit0
+    case digit1
+    case digit2
+    case digit3
+    case digit4
+    case digit5
+    case digit6
+    case digit7
+    case digit8
+    case digit9
+    case delete
+    case input
+    case menu
+    case info
+    case guide
+    case captions
+    case search
 }
 
 enum RemoteConnectionState: Equatable, Sendable {

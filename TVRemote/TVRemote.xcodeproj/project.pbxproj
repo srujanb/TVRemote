@@ -20,6 +20,7 @@
 		934C6F1E4B55B14B8F6B13DA /* BonjourServiceScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9700E700BBCC23FB9A5EB948 /* BonjourServiceScanner.swift */; };
 		A07D1EFC623EAC526590FD7A /* RemoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57E85B1DE6039239248F1A26 /* RemoteView.swift */; };
 		A1269877F23421CF85B13DD9 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 784629DA7BA2929332E6148D /* KeychainStore.swift */; };
+		B8E5F2A1C4079D3658AB21CD /* AdditionalControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4A7C1E2F3098B7654C210AB /* AdditionalControlsView.swift */; };
 		B27624ECC8EF9C833915E652 /* RemoteCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B889E3D1A019F0FAB557FB /* RemoteCoordinator.swift */; };
 		C551F4A6515673FF6C8E9921 /* RokuAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12799DD089B4C558BD962BB5 /* RokuAdapter.swift */; };
 		EDDDC42E8C78A71246B10A87 /* TVKeyboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5631D9E40338636015A897 /* TVKeyboardView.swift */; };
@@ -54,6 +55,7 @@
 		B5C9E83DCC5A97976CD983C3 /* TVRemoteAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVRemoteAdapter.swift; sourceTree = "<group>"; };
 		C185FD3E25382F989E7810D5 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		C312E9C7FC9B612C7292F1D0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		D4A7C1E2F3098B7654C210AB /* AdditionalControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdditionalControlsView.swift; sourceTree = "<group>"; };
 		E9B889E3D1A019F0FAB557FB /* RemoteCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCoordinator.swift; sourceTree = "<group>"; };
 		FDD36A0D0C4B1D4398445B93 /* TVRemoteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVRemoteTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -133,6 +135,7 @@
 		2E16E37401BF859D360971C4 /* Remote */ = {
 			isa = PBXGroup;
 			children = (
+				D4A7C1E2F3098B7654C210AB /* AdditionalControlsView.swift */,
 				57E85B1DE6039239248F1A26 /* RemoteView.swift */,
 			);
 			path = Remote;
@@ -296,6 +299,7 @@
 				5543C0CBF955CA9C2B495648 /* PairingView.swift in Sources */,
 				1E944A587BD8F44BCA78CD20 /* RemoteCapabilities.swift in Sources */,
 				B27624ECC8EF9C833915E652 /* RemoteCoordinator.swift in Sources */,
+				B8E5F2A1C4079D3658AB21CD /* AdditionalControlsView.swift in Sources */,
 				A07D1EFC623EAC526590FD7A /* RemoteView.swift in Sources */,
 				C551F4A6515673FF6C8E9921 /* RokuAdapter.swift in Sources */,
 				EDDDC42E8C78A71246B10A87 /* TVKeyboardView.swift in Sources */,

@@ -5,16 +5,39 @@ struct RemoteView: View {
     let device: RemoteDevice
     var onShowSettings: () -> Void = {}
     var onShowDevices: () -> Void = {}
+    var onShowControls: () -> Void = {}
+    @State private var selectedPage = RemotePagerPage.remote
 
     private static let referenceScreenWidth: CGFloat = 294
     private static let referenceContentWidth: CGFloat = 246
-    private static let referenceContentHeight: CGFloat = 563
+    private static let referenceContentHeight: CGFloat = 568
 
     private var capabilities: RemoteCapabilities {
         coordinator.capabilities ?? .roku
     }
 
     var body: some View {
+        TabView(selection: $selectedPage) {
+            remotePage
+                .tag(RemotePagerPage.remote)
+
+            AdditionalRemotePage(
+                coordinator: coordinator,
+                device: device,
+                onShowDevices: onShowDevices,
+                onShowSettings: onShowSettings,
+                onShowRemote: showRemotePage
+            )
+            .tag(RemotePagerPage.more)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .background(RemotePalette.background.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
+        .preferredColorScheme(.dark)
+    }
+
+    private var remotePage: some View {
         GeometryReader { proxy in
             let widthScale = proxy.size.width / Self.referenceScreenWidth
             let heightScale = proxy.size.height / Self.referenceContentHeight
@@ -54,9 +77,6 @@ struct RemoteView: View {
             )
         }
         .background(RemotePalette.background.ignoresSafeArea())
-        .toolbar(.hidden, for: .navigationBar)
-        .toolbar(.hidden, for: .tabBar)
-        .preferredColorScheme(.dark)
     }
 
     private var connectionHeader: some View {
@@ -176,30 +196,24 @@ struct RemoteView: View {
     private var navigationSurface: some View {
         RemoteTouchpad(
             keyboardEnabled: capabilities.supportsKeyboard,
+            numberPadEnabled: capabilities.supportsNumberPad,
             onKeyboard: { coordinator.presentTextInput() },
+            onShowControls: onShowControls,
             send: send
         )
     }
 
     private var mediaControls: some View {
         HStack(spacing: 0) {
-            MediaButton(symbol: "backward.end.fill", label: "Previous") {
+            MediaButton(symbol: "backward.fill", label: "Rewind") {
                 send(.rewind)
             }
             Spacer(minLength: 0)
-            MediaButton(symbol: "stop", label: "Stop") {
+            MediaButton(symbol: "playpause.fill", label: "Play or pause") {
                 send(.playPause)
             }
             Spacer(minLength: 0)
-            MediaButton(symbol: "pause.fill", label: "Pause") {
-                send(.playPause)
-            }
-            Spacer(minLength: 0)
-            MediaButton(symbol: "play.fill", label: "Play") {
-                send(.playPause)
-            }
-            Spacer(minLength: 0)
-            MediaButton(symbol: "forward.end.fill", label: "Next") {
+            MediaButton(symbol: "forward.fill", label: "Fast forward") {
                 send(.fastForward)
             }
         }
@@ -215,7 +229,8 @@ struct RemoteView: View {
                 label: "Devices",
                 action: onShowDevices
             )
-            ModeButton(symbol: "remote.fill", label: "Remote", isSelected: true) {}
+            ModeButton(symbol: "av.remote.fill", label: "Remote", isSelected: true) {}
+            ModeButton(symbol: "square.grid.2x2.fill", label: "More", action: showMorePage)
             ModeButton(symbol: "slider.horizontal.3", label: "Settings", action: onShowSettings)
         }
         .padding(4)
@@ -232,9 +247,26 @@ struct RemoteView: View {
     private func send(_ command: RemoteCommand) {
         Task { await coordinator.send(command) }
     }
+
+    private func showRemotePage() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            selectedPage = .remote
+        }
+    }
+
+    private func showMorePage() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            selectedPage = .more
+        }
+    }
 }
 
-private enum RemotePalette {
+private enum RemotePagerPage: Hashable {
+    case remote
+    case more
+}
+
+enum RemotePalette {
     static let background = Color(red: 8 / 255, green: 8 / 255, blue: 15 / 255)
     static let surface = Color(red: 15 / 255, green: 15 / 255, blue: 25 / 255)
     static let control = Color(red: 34 / 255, green: 34 / 255, blue: 57 / 255)
@@ -331,7 +363,9 @@ private struct RockerControl: View {
 
 private struct RemoteTouchpad: View {
     let keyboardEnabled: Bool
+    let numberPadEnabled: Bool
     let onKeyboard: () -> Void
+    let onShowControls: () -> Void
     let send: (RemoteCommand) -> Void
 
     var body: some View {
@@ -359,8 +393,10 @@ private struct RemoteTouchpad: View {
                 TouchpadCircleButton(
                     text: "123",
                     accessibilityLabel: "Number pad",
-                    action: onKeyboard
+                    action: onShowControls
                 )
+                .opacity(numberPadEnabled ? 1 : 0.4)
+                .disabled(!numberPadEnabled)
                 .position(x: 20, y: 20)
 
                 TouchpadCircleButton(
@@ -549,7 +585,7 @@ private struct MediaButton: View {
     }
 }
 
-private struct ModeButton: View {
+struct ModeButton: View {
     let symbol: String
     let label: String
     var isSelected = false
@@ -562,7 +598,8 @@ private struct ModeButton: View {
                 .foregroundStyle(
                     isSelected ? RemotePalette.primaryText : RemotePalette.mutedText
                 )
-                .frame(width: 42, height: 31)
+                .frame(width: 46, height: 44)
+                .contentShape(Rectangle())
                 .background {
                     if isSelected {
                         Capsule()

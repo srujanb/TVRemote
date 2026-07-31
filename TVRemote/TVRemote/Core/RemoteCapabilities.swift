@@ -28,13 +28,17 @@ struct RemoteCapabilities: Equatable, Sendable {
     let supportsVolume: Bool
     let supportsPower: Bool
     let supportsChannel: Bool
+    let supportsNumberPad: Bool
+    let extraCommands: Set<RemoteCommand>
 
     static let roku = RemoteCapabilities(
         supportsKeyboard: true,
         supportsColorButtons: false,
         supportsVolume: true,
         supportsPower: true,
-        supportsChannel: true
+        supportsChannel: true,
+        supportsNumberPad: true,
+        extraCommands: [.menu, .search]
     )
 
     static let googleTV = RemoteCapabilities(
@@ -42,7 +46,9 @@ struct RemoteCapabilities: Equatable, Sendable {
         supportsColorButtons: true,
         supportsVolume: true,
         supportsPower: true,
-        supportsChannel: true
+        supportsChannel: true,
+        supportsNumberPad: true,
+        extraCommands: [.input, .menu, .info, .guide, .captions, .search]
     )
 
     static let appleTV = RemoteCapabilities(
@@ -50,6 +56,8 @@ struct RemoteCapabilities: Equatable, Sendable {
         supportsColorButtons: false,
         supportsVolume: true,
         supportsPower: true,
-        supportsChannel: true
+        supportsChannel: true,
+        supportsNumberPad: false,
+        extraCommands: []
     )
 }

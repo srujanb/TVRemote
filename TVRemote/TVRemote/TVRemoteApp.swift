@@ -14,32 +14,23 @@ struct TVRemoteApp: App {
 struct ContentView: View {
     @ObservedObject var coordinator: RemoteCoordinator
     @State private var pairingCode = ""
-    @State private var selectedTab = 0
+    @State private var presentedSheet: RemoteSheet?
 
     var body: some View {
         ZStack(alignment: .top) {
-            TabView(selection: $selectedTab) {
-                NavigationStack {
-                    Group {
-                        if coordinator.isConnected, let device = coordinator.selectedDevice {
-                            RemoteView(coordinator: coordinator, device: device)
-                        } else {
-                            DeviceListView(coordinator: coordinator)
-                        }
+            NavigationStack {
+                Group {
+                    if coordinator.isConnected, let device = coordinator.selectedDevice {
+                        RemoteView(
+                            coordinator: coordinator,
+                            device: device,
+                            onShowSettings: { presentedSheet = .settings },
+                            onShowDevices: { presentedSheet = .devices }
+                        )
+                    } else {
+                        DeviceListView(coordinator: coordinator)
                     }
                 }
-                .tabItem {
-                    Label("Remote", systemImage: "tv")
-                }
-                .tag(0)
-
-                NavigationStack {
-                    SettingsView(coordinator: coordinator)
-                }
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .tag(1)
             }
             .blur(radius: coordinator.textInputSession == nil ? 0 : 6)
             .allowsHitTesting(coordinator.textInputSession == nil)
@@ -68,30 +59,74 @@ struct ContentView: View {
         }
         .onChange(of: coordinator.textInputSession?.id) { _, sessionID in
             if sessionID != nil {
-                selectedTab = 0
+                presentedSheet = nil
             }
         }
-        .sheet(
-            isPresented: Binding(
-                get: { coordinator.pairingPrompt != nil },
-                set: { if !$0 { coordinator.pairingPrompt = nil } }
-            )
-        ) {
-            if let prompt = coordinator.pairingPrompt {
-                PairingView(
-                    prompt: prompt,
-                    code: $pairingCode,
-                    errorMessage: coordinator.errorMessage
-                ) {
-                    let code = pairingCode
-                    Task {
-                        await coordinator.submitPIN(code)
-                        if coordinator.isConnected { pairingCode = "" }
+        .onChange(of: coordinator.pairingPrompt) { _, prompt in
+            if prompt != nil {
+                presentedSheet = .pairing
+            } else if presentedSheet == .pairing {
+                presentedSheet = nil
+            }
+        }
+        .onChange(of: coordinator.state) { _, state in
+            if state == .connected, presentedSheet == .devices {
+                presentedSheet = nil
+            }
+        }
+        .sheet(item: $presentedSheet) { sheet in
+            switch sheet {
+            case .devices:
+                NavigationStack {
+                    DeviceListView(coordinator: coordinator)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { presentedSheet = nil }
+                            }
+                        }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+
+            case .settings:
+                NavigationStack {
+                    SettingsView(coordinator: coordinator)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { presentedSheet = nil }
+                            }
+                        }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+
+            case .pairing:
+                if let prompt = coordinator.pairingPrompt {
+                    PairingView(
+                        prompt: prompt,
+                        code: $pairingCode,
+                        errorMessage: coordinator.errorMessage
+                    ) {
+                        let code = pairingCode
+                        Task {
+                            await coordinator.submitPIN(code)
+                            if coordinator.isConnected { pairingCode = "" }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+private enum RemoteSheet: String, Identifiable {
+    case devices
+    case settings
+    case pairing
+
+    var id: String { rawValue }
 }
 
 private struct SettingsView: View {

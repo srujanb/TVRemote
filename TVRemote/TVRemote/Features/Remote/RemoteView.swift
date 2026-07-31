@@ -3,177 +3,230 @@ import SwiftUI
 struct RemoteView: View {
     @ObservedObject var coordinator: RemoteCoordinator
     let device: RemoteDevice
+    var onShowSettings: () -> Void = {}
+    var onShowDevices: () -> Void = {}
+
+    private static let referenceScreenWidth: CGFloat = 294
+    private static let referenceContentWidth: CGFloat = 246
+    private static let referenceContentHeight: CGFloat = 563
 
     private var capabilities: RemoteCapabilities {
         coordinator.capabilities ?? .roku
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 22) {
+        GeometryReader { proxy in
+            let widthScale = proxy.size.width / Self.referenceScreenWidth
+            let heightScale = proxy.size.height / Self.referenceContentHeight
+            let scale = min(widthScale, heightScale)
+
+            VStack(spacing: 0) {
                 connectionHeader
+                    .padding(.bottom, 18)
                 topControls
-                directionalPad
-                colorControls
+                    .padding(.bottom, 11)
+                quickControls
+                    .padding(.bottom, 15)
+                navigationSurface
+                    .padding(.bottom, 15)
                 mediaControls
-                volumeAndChannelControls
-                keyboardButton
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 21)
+                modeSwitcher
 
                 if let error = coordinator.errorMessage {
                     Text(error)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
+                        .font(.caption)
+                        .foregroundStyle(RemotePalette.power)
                         .multilineTextAlignment(.center)
+                        .padding(.top, 12)
+                        .padding(.horizontal, 8)
                 }
             }
-            .padding()
+            .frame(width: Self.referenceContentWidth)
+            .padding(.top, 15)
+            .padding(.bottom, 12)
+            .scaleEffect(scale, anchor: .top)
+            .frame(
+                width: proxy.size.width,
+                height: proxy.size.height,
+                alignment: .top
+            )
         }
-        .background(Color(uiColor: .systemGroupedBackground))
-        .navigationTitle(device.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Disconnect") {
-                    Task { await coordinator.disconnect() }
-                }
-            }
-        }
+        .background(RemotePalette.background.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
+        .preferredColorScheme(.dark)
     }
 
     private var connectionHeader: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(.green)
-                .frame(width: 9, height: 9)
-            Text("Connected · \(device.platform.displayName)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
+        Button(action: onShowDevices) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(displayDeviceName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(RemotePalette.secondaryText)
+                        .lineLimit(1)
+                    Text("Connected")
+                        .font(.system(size: 12))
+                        .foregroundStyle(RemotePalette.primaryText)
+                }
+                Spacer()
+                Image(systemName: "airplayvideo")
+                    .font(.system(size: 17, weight: .regular))
+                    .foregroundStyle(RemotePalette.primaryText)
+            }
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 4)
+        .buttonStyle(RemotePressStyle())
+        .accessibilityLabel("Choose a different TV")
+        .frame(height: 31)
     }
 
     private var topControls: some View {
         HStack {
-            RemoteButton(label: "Power", symbol: "power") {
+            RoundRemoteButton(
+                symbol: "power",
+                foreground: RemotePalette.power,
+                accessibilityLabel: "Power"
+            ) {
                 send(.power)
             }
+            .opacity(capabilities.supportsPower ? 1 : 0.4)
+            .disabled(!capabilities.supportsPower)
+
             Spacer()
-            RemoteButton(label: "Home", symbol: "house.fill") {
-                send(.home)
+
+            RoundRemoteButton(
+                symbol: "speaker.slash",
+                accessibilityLabel: "Mute"
+            ) {
+                send(.mute)
             }
-            Spacer()
-            RemoteButton(label: "Back", symbol: "arrow.uturn.backward") {
-                send(.back)
+        }
+        .frame(height: 38)
+        .padding(.horizontal, 6)
+    }
+
+    private var quickControls: some View {
+        HStack(alignment: .top, spacing: 11) {
+            RockerControl(
+                topSymbol: "chevron.up",
+                bottomSymbol: "chevron.down",
+                title: "Ch",
+                topLabel: "Channel up",
+                bottomLabel: "Channel down",
+                topAction: { send(.channelUp) },
+                bottomAction: { send(.channelDown) }
+            )
+            .opacity(capabilities.supportsChannel ? 1 : 0.4)
+            .disabled(!capabilities.supportsChannel)
+
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    ColorRemoteButton(
+                        name: "Red",
+                        color: .red,
+                        enabled: capabilities.supportsColorButtons
+                    ) {
+                        send(.red)
+                    }
+                    ColorRemoteButton(
+                        name: "Green",
+                        color: .green,
+                        enabled: capabilities.supportsColorButtons
+                    ) {
+                        send(.green)
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    ColorRemoteButton(
+                        name: "Yellow",
+                        color: .yellow,
+                        enabled: capabilities.supportsColorButtons
+                    ) {
+                        send(.yellow)
+                    }
+                    ColorRemoteButton(
+                        name: "Blue",
+                        color: .blue,
+                        enabled: capabilities.supportsColorButtons
+                    ) {
+                        send(.blue)
+                    }
+                }
             }
+            .frame(width: 112, height: 86)
+
+            RockerControl(
+                topSymbol: "plus",
+                bottomSymbol: "minus",
+                title: "Vol",
+                topLabel: "Volume up",
+                bottomLabel: "Volume down",
+                topAction: { send(.volumeUp) },
+                bottomAction: { send(.volumeDown) }
+            )
+            .opacity(capabilities.supportsVolume ? 1 : 0.4)
+            .disabled(!capabilities.supportsVolume)
         }
     }
 
-    private var directionalPad: some View {
-        VStack(spacing: 8) {
-            DPadButton(symbol: "chevron.up", label: "Up") { send(.up) }
-            HStack(spacing: 8) {
-                DPadButton(symbol: "chevron.left", label: "Left") { send(.left) }
-                Button {
-                    send(.select)
-                } label: {
-                    Text("OK")
-                        .font(.headline)
-                        .frame(width: 74, height: 74)
-                        .background(.tint, in: Circle())
-                        .foregroundStyle(.white)
-                }
-                .accessibilityLabel("Select")
-                DPadButton(symbol: "chevron.right", label: "Right") { send(.right) }
-            }
-            DPadButton(symbol: "chevron.down", label: "Down") { send(.down) }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var colorControls: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 12) {
-                ColorRemoteButton(name: "Red", color: .red, enabled: capabilities.supportsColorButtons) {
-                    send(.red)
-                }
-                ColorRemoteButton(name: "Green", color: .green, enabled: capabilities.supportsColorButtons) {
-                    send(.green)
-                }
-                ColorRemoteButton(name: "Yellow", color: .yellow, enabled: capabilities.supportsColorButtons) {
-                    send(.yellow)
-                }
-                ColorRemoteButton(name: "Blue", color: .blue, enabled: capabilities.supportsColorButtons) {
-                    send(.blue)
-                }
-            }
-
-            if !capabilities.supportsColorButtons {
-                Text("\(device.platform.displayName) does not expose color-button commands over Wi-Fi.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
-            if device.platform == .googleTV {
-                Text("Color buttons not working? Choose a color-button relay in Settings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-        }
+    private var navigationSurface: some View {
+        RemoteTouchpad(
+            keyboardEnabled: capabilities.supportsKeyboard,
+            onKeyboard: { coordinator.presentTextInput() },
+            send: send
+        )
     }
 
     private var mediaControls: some View {
-        HStack {
-            RemoteButton(label: "Rewind", symbol: "backward.fill") {
+        HStack(spacing: 0) {
+            MediaButton(symbol: "backward.end.fill", label: "Previous") {
                 send(.rewind)
             }
-            Spacer()
-            RemoteButton(label: "Play/Pause", symbol: "playpause.fill") {
+            Spacer(minLength: 0)
+            MediaButton(symbol: "stop", label: "Stop") {
                 send(.playPause)
             }
-            Spacer()
-            RemoteButton(label: "Forward", symbol: "forward.fill") {
+            Spacer(minLength: 0)
+            MediaButton(symbol: "pause.fill", label: "Pause") {
+                send(.playPause)
+            }
+            Spacer(minLength: 0)
+            MediaButton(symbol: "play.fill", label: "Play") {
+                send(.playPause)
+            }
+            Spacer(minLength: 0)
+            MediaButton(symbol: "forward.end.fill", label: "Next") {
                 send(.fastForward)
             }
         }
+        .padding(.horizontal, 13)
+        .frame(height: 38)
+        .background(RemotePalette.control, in: Capsule())
     }
 
-    private var volumeAndChannelControls: some View {
-        HStack(spacing: 14) {
-            ControlGroupBox(title: "Volume") {
-                HStack {
-                    CompactButton(symbol: "minus") { send(.volumeDown) }
-                    CompactButton(symbol: "speaker.slash.fill") { send(.mute) }
-                    CompactButton(symbol: "plus") { send(.volumeUp) }
-                }
-            }
-            .opacity(capabilities.supportsVolume ? 1 : 0.45)
-            .disabled(!capabilities.supportsVolume)
-
-            ControlGroupBox(title: "Channel") {
-                HStack {
-                    CompactButton(symbol: "chevron.down") { send(.channelDown) }
-                    CompactButton(symbol: "chevron.up") { send(.channelUp) }
-                }
-            }
-            .opacity(capabilities.supportsChannel ? 1 : 0.45)
-            .disabled(!capabilities.supportsChannel)
+    private var modeSwitcher: some View {
+        HStack(spacing: 2) {
+            ModeButton(
+                symbol: "airplayvideo",
+                label: "Devices",
+                action: onShowDevices
+            )
+            ModeButton(symbol: "remote.fill", label: "Remote", isSelected: true) {}
+            ModeButton(symbol: "slider.horizontal.3", label: "Settings", action: onShowSettings)
         }
+        .padding(4)
+        .background(RemotePalette.switcherBackground, in: Capsule())
     }
 
-    private var keyboardButton: some View {
-        Button {
-            coordinator.presentTextInput()
-        } label: {
-            Label("Type on TV", systemImage: "keyboard")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
+    private var displayDeviceName: String {
+        if device.name.localizedCaseInsensitiveContains(device.platform.displayName) {
+            return device.name
         }
-        .buttonStyle(.borderedProminent)
-        .disabled(!capabilities.supportsKeyboard)
+        return "\(device.platform.displayName) - \(device.name)"
     }
 
     private func send(_ command: RemoteCommand) {
@@ -181,41 +234,35 @@ struct RemoteView: View {
     }
 }
 
-private struct RemoteButton: View {
-    let label: String
-    let symbol: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: symbol)
-                    .font(.title3)
-                Text(label)
-                    .font(.caption)
-                    .lineLimit(1)
-            }
-            .frame(width: 84, height: 58)
-        }
-        .buttonStyle(.bordered)
-    }
+private enum RemotePalette {
+    static let background = Color(red: 8 / 255, green: 8 / 255, blue: 15 / 255)
+    static let surface = Color(red: 15 / 255, green: 15 / 255, blue: 25 / 255)
+    static let control = Color(red: 34 / 255, green: 34 / 255, blue: 57 / 255)
+    static let touchpad = Color(red: 35 / 255, green: 35 / 255, blue: 59 / 255)
+    static let selected = Color(red: 49 / 255, green: 49 / 255, blue: 79 / 255)
+    static let switcherBackground = Color(red: 13 / 255, green: 13 / 255, blue: 22 / 255)
+    static let primaryText = Color(red: 240 / 255, green: 240 / 255, blue: 247 / 255)
+    static let secondaryText = Color(red: 159 / 255, green: 157 / 255, blue: 170 / 255)
+    static let mutedText = Color(red: 103 / 255, green: 102 / 255, blue: 119 / 255)
+    static let power = Color(red: 1, green: 43 / 255, blue: 78 / 255)
 }
 
-private struct DPadButton: View {
+private struct RoundRemoteButton: View {
     let symbol: String
-    let label: String
+    var foreground = RemotePalette.primaryText
+    let accessibilityLabel: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.title2.bold())
-                .frame(width: 74, height: 54)
-                .background(.background, in: RoundedRectangle(cornerRadius: 18))
-                .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(foreground)
+                .frame(width: 50, height: 38)
+                .background(RemotePalette.control, in: Capsule())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
+        .buttonStyle(RemotePressStyle())
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
@@ -227,47 +274,266 @@ private struct ColorRemoteButton: View {
 
     var body: some View {
         Button(action: action) {
-            Circle()
-                .fill(enabled ? color : Color.secondary.opacity(0.25))
-                .frame(width: 52, height: 52)
+            Capsule()
+                .stroke(color.opacity(enabled ? 0.95 : 0.25), lineWidth: 1.7)
+                .frame(width: 20, height: 11)
+                .frame(width: 50, height: 38)
+                .background(RemotePalette.control, in: Capsule())
                 .overlay {
-                    if !enabled {
-                        Image(systemName: "nosign")
-                            .foregroundStyle(.secondary)
-                    }
+                    Capsule()
+                        .stroke(.white.opacity(0.025), lineWidth: 0.5)
                 }
         }
+        .buttonStyle(RemotePressStyle())
         .disabled(!enabled)
         .accessibilityLabel("\(name) button\(enabled ? "" : ", unavailable")")
     }
 }
 
-private struct CompactButton: View {
+private struct RockerControl: View {
+    let topSymbol: String
+    let bottomSymbol: String
+    let title: String
+    let topLabel: String
+    let bottomLabel: String
+    let topAction: () -> Void
+    let bottomAction: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button(action: topAction) {
+                Image(systemName: topSymbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 50, height: 29)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel(topLabel)
+
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundStyle(RemotePalette.mutedText)
+                .frame(height: 27)
+
+            Button(action: bottomAction) {
+                Image(systemName: bottomSymbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 50, height: 29)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel(bottomLabel)
+        }
+        .foregroundStyle(RemotePalette.primaryText)
+        .frame(width: 50, height: 86)
+        .background(RemotePalette.control, in: RoundedRectangle(cornerRadius: 17))
+        .buttonStyle(RemotePressStyle())
+    }
+}
+
+private struct RemoteTouchpad: View {
+    let keyboardEnabled: Bool
+    let onKeyboard: () -> Void
+    let send: (RemoteCommand) -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let height = proxy.size.height
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 23)
+                    .fill(RemotePalette.surface)
+
+                Button {
+                    send(.select)
+                } label: {
+                    RoundedRectangle(cornerRadius: 40)
+                        .fill(RemotePalette.touchpad)
+                        .frame(width: 188, height: 165)
+                        .overlay {
+                            TouchpadDots()
+                        }
+                }
+                .buttonStyle(RemotePressStyle())
+                .position(x: width / 2, y: height / 2)
+                .accessibilityLabel("Select")
+                .accessibilityHint("Tap to select")
+
+                DirectionButton(symbol: "chevron.up", label: "Up") { send(.up) }
+                    .position(x: width / 2, y: 12)
+                DirectionButton(symbol: "chevron.left", label: "Left") { send(.left) }
+                    .position(x: 13, y: height / 2)
+                DirectionButton(symbol: "chevron.right", label: "Right") { send(.right) }
+                    .position(x: width - 13, y: height / 2)
+                DirectionButton(symbol: "chevron.down", label: "Down") { send(.down) }
+                    .position(x: width / 2, y: height - 12)
+
+                TouchpadCircleButton(
+                    text: "123",
+                    accessibilityLabel: "Number pad",
+                    action: onKeyboard
+                )
+                .position(x: 20, y: 20)
+
+                TouchpadCircleButton(
+                    symbol: "keyboard",
+                    accessibilityLabel: "Keyboard",
+                    action: onKeyboard
+                )
+                .opacity(keyboardEnabled ? 1 : 0.4)
+                .disabled(!keyboardEnabled)
+                .position(x: width - 20, y: 20)
+
+                TouchpadCircleButton(
+                    symbol: "arrow.left",
+                    accessibilityLabel: "Back"
+                ) {
+                    send(.back)
+                }
+                .position(x: 20, y: height - 20)
+
+                TouchpadCircleButton(
+                    symbol: "house",
+                    accessibilityLabel: "Home"
+                ) {
+                    send(.home)
+                }
+                .position(x: width - 20, y: height - 20)
+            }
+        }
+        .frame(height: 224)
+    }
+}
+
+private struct TouchpadDots: View {
+    var body: some View {
+        VStack(spacing: 9) {
+            ForEach(0..<5, id: \.self) { row in
+                HStack(spacing: 9) {
+                    ForEach(0..<5, id: \.self) { column in
+                        Circle()
+                            .fill(RemotePalette.mutedText)
+                            .frame(width: 1.4, height: 1.4)
+                            .opacity(dotOpacity(row: row, column: column))
+                    }
+                }
+            }
+        }
+    }
+
+    private func dotOpacity(row: Int, column: Int) -> Double {
+        let distance = abs(row - 2) + abs(column - 2)
+        if distance <= 1 { return 0.25 }
+        if row == 2 || column == 2 { return 0.12 }
+        return 0
+    }
+}
+
+private struct DirectionButton: View {
     let symbol: String
+    let label: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .frame(minWidth: 30, minHeight: 34)
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(RemotePalette.mutedText)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
 
-private struct ControlGroupBox<Content: View>: View {
-    let title: String
-    @ViewBuilder let content: Content
+private struct TouchpadCircleButton: View {
+    var symbol: String?
+    var text: String?
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    init(
+        symbol: String? = nil,
+        text: String? = nil,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) {
+        self.symbol = symbol
+        self.text = text
+        self.accessibilityLabel = accessibilityLabel
+        self.action = action
+    }
 
     var body: some View {
-        VStack(spacing: 8) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            content
+        Button(action: action) {
+            Group {
+                if let symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 16, weight: .regular))
+                } else if let text {
+                    Text(text)
+                        .font(.system(size: 11, weight: .medium))
+                }
+            }
+            .foregroundStyle(RemotePalette.primaryText)
+            .frame(width: 40, height: 40)
+            .background(RemotePalette.control, in: Circle())
         }
-        .padding(10)
-        .frame(maxWidth: .infinity)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14))
+        .buttonStyle(RemotePressStyle())
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private struct MediaButton: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(RemotePalette.primaryText)
+                .frame(width: 28, height: 38)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(RemotePressStyle())
+        .accessibilityLabel(label)
+    }
+}
+
+private struct ModeButton: View {
+    let symbol: String
+    let label: String
+    var isSelected = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(
+                    isSelected ? RemotePalette.primaryText : RemotePalette.mutedText
+                )
+                .frame(width: 42, height: 31)
+                .background {
+                    if isSelected {
+                        Capsule()
+                            .fill(RemotePalette.selected)
+                    }
+                }
+        }
+        .buttonStyle(RemotePressStyle())
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct RemotePressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .opacity(configuration.isPressed ? 0.75 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }

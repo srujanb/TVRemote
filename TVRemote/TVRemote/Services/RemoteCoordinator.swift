@@ -5,6 +5,7 @@ final class RemoteCoordinator: ObservableObject {
     @Published private(set) var devices: [RemoteDevice] = RecentDeviceStore.load()
     @Published private(set) var selectedDevice: RemoteDevice?
     @Published private(set) var state = RemoteConnectionState.disconnected
+    @Published private(set) var isRefreshingDevices = false
     @Published var pairingPrompt: PairingPrompt?
     @Published var errorMessage: String?
     @Published var statusMessage = "Choose a TV to begin."
@@ -55,7 +56,12 @@ final class RemoteCoordinator: ObservableObject {
     }
 
     func refresh() async {
-        state = .discovering
+        let preserveConnection = isConnected
+        isRefreshingDevices = true
+        defer { isRefreshingDevices = false }
+        if !preserveConnection {
+            state = .discovering
+        }
         statusMessage = "Looking for TVs on your Wi-Fi…"
         errorMessage = nil
 
@@ -74,7 +80,9 @@ final class RemoteCoordinator: ObservableObject {
             }
             return $0.platform.displayName < $1.platform.displayName
         }
-        state = .disconnected
+        if !preserveConnection {
+            state = .disconnected
+        }
         statusMessage = found.isEmpty
             ? "No new TVs found. You can add a Roku or Google TV by IP address."
             : "Found \(found.count) TV\(found.count == 1 ? "" : "s")."

@@ -10,7 +10,7 @@ struct DeviceListView: View {
                 statusRow
             }
 
-            if coordinator.devices.isEmpty, coordinator.state != .discovering {
+            if coordinator.devices.isEmpty, !coordinator.isRefreshingDevices {
                 ContentUnavailableView(
                     "No TVs Found",
                     systemImage: "tv.slash",
@@ -59,7 +59,7 @@ struct DeviceListView: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .disabled(coordinator.state == .discovering)
+                .disabled(coordinator.isRefreshingDevices)
                 .accessibilityLabel("Refresh TVs")
             }
         }
@@ -77,7 +77,7 @@ struct DeviceListView: View {
     @ViewBuilder
     private var statusRow: some View {
         HStack(spacing: 12) {
-            if coordinator.state == .discovering || coordinator.state == .connecting {
+            if coordinator.isRefreshingDevices || coordinator.state == .connecting {
                 ProgressView()
             } else {
                 Image(systemName: "wifi")

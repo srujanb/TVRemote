@@ -330,6 +330,11 @@ final class RemoteCoordinator: ObservableObject {
         textInputDismissedAt = Date()
     }
 
+    func closeTVKeyboard() async {
+        await textUpdateTask?.value
+        await send(.back)
+    }
+
     private func discover(using adapter: TVRemoteAdapter) async -> [RemoteDevice] {
         (try? await adapter.discover(timeout: 2.5)) ?? []
     }

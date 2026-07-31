@@ -50,11 +50,18 @@ struct ContentView: View {
                         set: { coordinator.updateLiveText($0) }
                     ),
                     fieldLabel: session.fieldLabel,
-                    showsTVKeyboardHint: coordinator.selectedDevice?.platform == .googleTV,
-                    onClose: { coordinator.dismissTextInput() }
+                    showsTVKeyboardHint: coordinator.selectedDevice?.platform == .googleTV
                 )
                 .padding(.top, 8)
                 .zIndex(1)
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if coordinator.textInputSession != nil {
+                TVKeyboardCloseButton {
+                    Task { await coordinator.closeTVKeyboard() }
+                }
+                .padding(.bottom, 12)
             }
         }
         .onChange(of: coordinator.textInputSession?.id) { _, sessionID in

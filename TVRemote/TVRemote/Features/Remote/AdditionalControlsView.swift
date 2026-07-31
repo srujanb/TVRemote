@@ -71,8 +71,6 @@ struct NumberPadView: View {
 struct AdditionalRemotePage: View {
     @ObservedObject var coordinator: RemoteCoordinator
     let device: RemoteDevice
-    let onShowDevices: () -> Void
-    let onShowSettings: () -> Void
     let onShowRemote: () -> Void
 
     var body: some View {
@@ -95,8 +93,6 @@ struct AdditionalRemotePage: View {
                     .font(.caption)
                     .foregroundStyle(AdditionalControlsPalette.secondaryText)
                     .padding(.bottom, 16)
-
-                modeSwitcher
             }
             .padding(.horizontal, 32)
             .padding(.top, 18)
@@ -184,25 +180,6 @@ struct AdditionalRemotePage: View {
             ExtraControl(command: .search, label: "Search", symbol: "magnifyingglass")
         ]
         .filter { capabilities.extraCommands.contains($0.command) }
-    }
-
-    private var modeSwitcher: some View {
-        HStack(spacing: 2) {
-            ModeButton(
-                symbol: "airplayvideo",
-                label: "Devices",
-                action: onShowDevices
-            )
-            ModeButton(symbol: "av.remote.fill", label: "Remote", action: onShowRemote)
-            ModeButton(symbol: "square.grid.2x2.fill", label: "More", isSelected: true) {}
-            ModeButton(
-                symbol: "slider.horizontal.3",
-                label: "Settings",
-                action: onShowSettings
-            )
-        }
-        .padding(4)
-        .background(RemotePalette.switcherBackground, in: Capsule())
     }
 
     private func send(_ command: RemoteCommand) {

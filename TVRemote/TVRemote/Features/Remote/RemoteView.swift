@@ -10,27 +10,30 @@ struct RemoteView: View {
 
     private static let referenceScreenWidth: CGFloat = 294
     private static let referenceContentWidth: CGFloat = 246
-    private static let referenceContentHeight: CGFloat = 568
+    private static let referenceContentHeight: CGFloat = 504
 
     private var capabilities: RemoteCapabilities {
         coordinator.capabilities ?? .roku
     }
 
     var body: some View {
-        TabView(selection: $selectedPage) {
-            remotePage
-                .tag(RemotePagerPage.remote)
+        VStack(spacing: 0) {
+            TabView(selection: $selectedPage) {
+                remotePage
+                    .tag(RemotePagerPage.remote)
 
-            AdditionalRemotePage(
-                coordinator: coordinator,
-                device: device,
-                onShowDevices: onShowDevices,
-                onShowSettings: onShowSettings,
-                onShowRemote: showRemotePage
-            )
-            .tag(RemotePagerPage.more)
+                AdditionalRemotePage(
+                    coordinator: coordinator,
+                    device: device,
+                    onShowRemote: showRemotePage
+                )
+                .tag(RemotePagerPage.more)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+
+            modeSwitcher
+                .padding(.bottom, 12)
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
         .background(RemotePalette.background.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
@@ -55,7 +58,6 @@ struct RemoteView: View {
                 mediaControls
                     .padding(.horizontal, 6)
                     .padding(.bottom, 21)
-                modeSwitcher
 
                 if let error = coordinator.errorMessage {
                     Text(error)
@@ -68,7 +70,6 @@ struct RemoteView: View {
             }
             .frame(width: Self.referenceContentWidth)
             .padding(.top, 15)
-            .padding(.bottom, 12)
             .scaleEffect(scale, anchor: .top)
             .frame(
                 width: proxy.size.width,
@@ -229,8 +230,18 @@ struct RemoteView: View {
                 label: "Devices",
                 action: onShowDevices
             )
-            ModeButton(symbol: "av.remote.fill", label: "Remote", isSelected: true) {}
-            ModeButton(symbol: "square.grid.2x2.fill", label: "More", action: showMorePage)
+            ModeButton(
+                symbol: "av.remote.fill",
+                label: "Remote",
+                isSelected: selectedPage == .remote,
+                action: showRemotePage
+            )
+            ModeButton(
+                symbol: "square.grid.2x2.fill",
+                label: "More",
+                isSelected: selectedPage == .more,
+                action: showMorePage
+            )
             ModeButton(symbol: "slider.horizontal.3", label: "Settings", action: onShowSettings)
         }
         .padding(4)
